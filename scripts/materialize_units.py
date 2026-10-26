@@ -61,8 +61,8 @@ LABOR = ("加班", "打工", "牛马", "裁员", "薪资", "工资", "老板", "
 STICKER_RE = re.compile(r"\[[^\[\]]{1,30}\]")
 
 # Number of preceding same-floor comments shown as C_core (in addition to the
-# floor root), matching the "本层 + 前面 3 个评论" context spec.
-CORE_PRIOR_N = 3
+# floor root), matching the "本层 + 前面 5 个评论" context spec.
+CORE_PRIOR_N = 5
 
 SCHEMA = f"""
 create table if not exists meta(key text primary key, value text);
@@ -88,6 +88,17 @@ create table if not exists annotations(
 );
 create index if not exists idx_ann_unit on annotations(unit_id);
 create index if not exists idx_ann_annotator on annotations(annotator);
+-- archive of context-missing comments excluded from the annotation pool.
+-- Kept for provenance / possible later recovery; NOT shown to annotators.
+create table if not exists excluded_comments(
+  id integer primary key autoincrement,
+  bvid text, target_rpid text, parent_rpid text, root_rpid text,
+  target_user text, target_text text, target_len integer,
+  exclusion_label text, parent_present integer, orphan_replies integer,
+  pub_ts integer, created_at integer
+);
+create index if not exists idx_excl_bvid on excluded_comments(bvid);
+create index if not exists idx_excl_label on excluded_comments(exclusion_label);
 """
 
 
@@ -245,25 +256,26 @@ def video_is_labor(meta: dict) -> str:
 
 
 # ----------------------------- per-video pass ----------------------------- #
-def process_video(con, bvid, meta) -> tuple[list[tuple], int]:
+def process_video(con, bvid, meta, include_roots=False, keep_degraded=False) -> tuple[list[tuple], list[dict]]:
     """Compact candidate records for one video: (rpid, stratum_key_json, bvid).
 
-    Only comments whose **entire ancestor chain resolves to a floor root within
-    the collected data** are emitted. Comments whose parent was deleted/not
-    collected cannot be given a faithful context card (empty/degraded anchor and
-    path), so they are excluded here rather than silently mis-contextualised
-    downstream. Returns (candidates, n_excluded_broken_chain).
+    Only **reply** comments whose entire ancestor chain resolves to a floor
+    root within the collected data are emitted as annotation candidates. Broken
+    chains (parent or higher ancestor missing) cannot be given a faithful
+    context card, so they are diverted into an archive list (with a special
+    label) instead of being annotated. Root comments are skipped unless
+    ``include_roots`` is set. Returns (candidates, archive_records).
     """
     rows = con.execute(
-        "select rpid,parent_rpid,root_rpid,hierarchy_level,content,pub_ts "
+        "select rpid,parent_rpid,root_rpid,hierarchy_level,content,pub_ts,user_name "
         "from comments where bvid=? order by rpid", (bvid,),
     ).fetchall()
     if not rows:
-        return [], 0
+        return [], []
     by_rpid = {r[0]: r for r in rows}
     floor_of = {}
     floor_size = defaultdict(int)
-    for rpid, parent, root, lvl, content, ts in rows:
+    for rpid, parent, root, lvl, content, ts, _u in rows:
         fk = rpid if lvl == "root" else root
         floor_of[rpid] = fk
         floor_size[fk] += 1
@@ -326,21 +338,37 @@ def process_video(con, bvid, meta) -> tuple[list[tuple], int]:
 
     topic = video_is_labor(meta)
     out = []
-    n_degraded = 0
-    for rpid, parent, root, lvl, content, ts in rows:
+    archive = []
+    for rpid, parent, root, lvl, content, ts, uname in rows:
         content = content or ""
         tlen = len(content)
         if tlen == 0:
             continue
-        degraded = 0
-        if lvl != "root" and not chain_valid(rpid):
-            degraded = 1  # ancestor (parent or higher) missing -> degraded context
-            n_degraded += 1
-        d = 0 if lvl == "root" else depth(rpid)
+        is_root = (lvl == "root")
+        if is_root and not include_roots:
+            continue
+        if not is_root and not chain_valid(rpid):
+            if not keep_degraded:
+                # context-missing reply -> archive with special label, do not annotate
+                parent_present = 1 if parent in by_rpid else 0
+                reason = "parent_gap" if not parent_present else "ancestor_gap"
+                orphan = 0
+                if not parent_present:
+                    orphan = sum(1 for x in rows if x[1] == parent)
+                archive.append({
+                    "bvid": bvid, "target_rpid": rpid, "parent_rpid": parent,
+                    "root_rpid": root, "target_user": uname or "",
+                    "target_text": content, "target_len": tlen,
+                    "exclusion_label": reason, "parent_present": parent_present,
+                    "orphan_replies": orphan, "pub_ts": int(ts or 0),
+                })
+                continue
+            # keep_degraded=True: fall through and emit as candidate (flagged)
+        d = 0 if is_root else depth(rpid)
         skey = (topic, heat_bucket(floor_size[floor_of[rpid]]), depth_bucket(d),
                 polarity_bucket(content), flagtype(content, tlen), length_bucket(tlen))
-        out.append((rpid, json.dumps(skey, ensure_ascii=False), bvid, degraded))
-    return out, n_degraded
+        out.append((rpid, json.dumps(skey, ensure_ascii=False), bvid, 0))
+    return out, archive
 
 
 # ----------------------------- stratified sample ----------------------------- #
@@ -556,6 +584,10 @@ def main():
     ap.add_argument("--out", default="/Users/mushiquan/Desktop/bili-annotator/data/annotation.db")
     ap.add_argument("--target", type=int, default=500)
     ap.add_argument("--seed", type=int, default=20261026)
+    ap.add_argument("--include-roots", action="store_true",
+                    help="also treat root comments as annotation candidates (default: replies only)")
+    ap.add_argument("--keep-degraded", action="store_true",
+                    help="keep context-missing comments as (flagged) candidates instead of archiving them")
     ap.add_argument("--force", action="store_true",
                     help="overwrite even if annotations already exist")
     args = ap.parse_args()
@@ -579,17 +611,19 @@ def main():
 
     con = sqlite3.connect(args.corpus)
     all_cands: list[tuple] = []
-    n_degraded = 0
+    all_archive: list[dict] = []
     for i, bvid in enumerate(bvids):
-        cands, degraded = process_video(con, bvid, meta_by_bvid.get(
-            bvid, {"title": "", "author": "", "desc": "", "tags": []}))
+        cands, archive = process_video(
+            con, bvid,
+            meta_by_bvid.get(bvid, {"title": "", "author": "", "desc": "", "tags": []}),
+            include_roots=args.include_roots, keep_degraded=args.keep_degraded)
         all_cands.extend(cands)
-        n_degraded += degraded
+        all_archive.extend(archive)
         if (i + 1) % 200 == 0:
             print(f"  processed {i+1}/{len(bvids)} videos, cands={len(all_cands):,}, "
-                  f"context_degraded={n_degraded:,}")
-    print(f"total candidate comments: {len(all_cands):,} "
-          f"(context_degraded: {n_degraded:,})")
+                  f"archived_excluded={len(all_archive):,}")
+    print(f"total annotation candidates: {len(all_cands):,} "
+          f"| archived (context-missing): {len(all_archive):,}")
 
     picked = stratified_sample(all_cands, args.target, args.seed)
     print(f"sampled {len(picked)} units; building cards...")
@@ -598,6 +632,8 @@ def main():
     ensure_schema(out)
     out.execute("delete from units")
     out.execute("delete from sqlite_sequence where name='units'")
+    out.execute("delete from excluded_comments")
+    out.execute("delete from sqlite_sequence where name='excluded_comments'")
     if args.force:
         out.execute("delete from annotations")
     built = 0
@@ -615,6 +651,24 @@ def main():
             built += 1
         except Exception as e:  # noqa: BLE001 - keep going on a single bad row
             print(f"  skip {rpid}: {e}")
+
+    # archive of excluded context-missing comments (special label, not annotated)
+    now = int(time.time())
+    archived = 0
+    for a in all_archive:
+        out.execute(
+            "insert into excluded_comments(bvid,target_rpid,parent_rpid,root_rpid,"
+            "target_user,target_text,target_len,exclusion_label,parent_present,"
+            "orphan_replies,pub_ts,created_at) values(?,?,?,?,?,?,?,?,?,?,?,?)",
+            (a["bvid"], a["target_rpid"], a["parent_rpid"], a["root_rpid"],
+             a["target_user"], a["target_text"], a["target_len"],
+             a["exclusion_label"], a["parent_present"], a["orphan_replies"],
+             a["pub_ts"], now))
+        archived += 1
+    by_label = defaultdict(int)
+    for a in all_archive:
+        by_label[a["exclusion_label"]] += 1
+
     # provenance
     prov = {
         "schema_version": SCHEMA_VERSION,
@@ -624,10 +678,15 @@ def main():
         "sampling.target_n": str(args.target),
         "sampling.n_units": str(built),
         "sampling.n_candidates": str(len(all_cands)),
-        "sampling.n_context_degraded_candidates": str(n_degraded),
-        "sampling.context_degraded_note": (
-            "comments whose ancestor chain is broken (deleted/uncaptured parent) "
-            "are KEPT and flagged context_degraded=1; D3 anchor degrades to floor root"),
+        "sampling.pool": "replies, complete-context only",
+        "sampling.include_roots": str(bool(args.include_roots)).lower(),
+        "sampling.keep_degraded": str(bool(args.keep_degraded)).lower(),
+        "sampling.n_archived_excluded": str(archived),
+        "sampling.archived_ancestor_gap": str(by_label.get("ancestor_gap", 0)),
+        "sampling.archived_parent_gap": str(by_label.get("parent_gap", 0)),
+        "sampling.archive_note": (
+            "context-missing comments are excluded from annotation and stored in "
+            "table excluded_comments with exclusion_label in {ancestor_gap,parent_gap}"),
         "sampling.stratification": STRATIFICATION_SPEC,
         "sampling.quota_rule": "quota ~ sqrt(stratum_size), min 1, then trim/topup",
         "source.a805": json.dumps(file_info(args.a805), ensure_ascii=False),
@@ -638,9 +697,11 @@ def main():
         out.execute("insert or replace into meta(key,value) values(?,?)", (k, str(v)))
     out.commit()
     n = out.execute("select count(*) from units").fetchone()[0]
+    n_ex = out.execute("select count(*) from excluded_comments").fetchone()[0]
     out.close()
     con.close()
-    print(f"\nDone. units in {args.out}: {n}")
+    print(f"\nDone. units in {args.out}: {n} | archived excluded: {n_ex} "
+          f"(ancestor_gap={by_label.get('ancestor_gap',0)}, parent_gap={by_label.get('parent_gap',0)})")
     print(f"seed={args.seed} persisted in meta('sampling.seed')")
 
 

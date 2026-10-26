@@ -607,6 +607,36 @@ def api_export():
         headers={"Content-Disposition": "attachment; filename=bili_annotations.csv"})
 
 
+@app.get("/api/export_excluded")
+def api_export_excluded():
+    """CSV of comments excluded from annotation due to missing context."""
+    label = (request.args.get("label") or "").strip()
+    conn = db()
+    q = ("select bvid, target_rpid, parent_rpid, root_rpid, target_user, "
+         "target_text, target_len, exclusion_label, parent_present, "
+         "orphan_replies, pub_ts from excluded_comments ")
+    params = ()
+    if label:
+        q += "where exclusion_label = ? "
+        params = (label,)
+    q += "order by bvid, target_rpid"
+    try:
+        rows = conn.execute(q, params).fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+    conn.close()
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["bvid", "target_rpid", "parent_rpid", "root_rpid", "target_user",
+                "target_text", "target_len", "exclusion_label", "parent_present",
+                "orphan_replies", "pub_ts"])
+    for r in rows:
+        w.writerow([r[k] for k in r.keys()])
+    return Response(
+        buf.getvalue(), mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=bili_excluded.csv"})
+
+
 if __name__ == "__main__":
     import os
     # Bind to localhost by default; opt into LAN sharing explicitly. Never run

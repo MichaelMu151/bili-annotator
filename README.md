@@ -50,15 +50,16 @@ ANNOTATOR_HOST=0.0.0.0 python app.py
 | `[VIDEO]` | 标题 / UP / 标签 / **可编辑摘要** + BV 链接（建议亲自核对视频） |
 | `[ANCHOR]` | 分支 root 原文 + **人工 anchor claim（≤30字）**；维度 3 的漂移基准 |
 | `[PATH]` | 祖先链 `root → … → parent` **完整逐字**（长链默认折叠；micro 上下文） |
-| `[CORE]` | **本层** = 楼层根评论 + **前面 3 个评论**（`C_CORE_PRIOR_N=3`；meso 上下文） |
+| `[CORE]` | **本层** = 楼层根评论 + **前面 5 个评论**（`C_CORE_PRIOR_N=5`；meso 上下文） |
 | `[TARGET]` | 待标评论 |
 
-**上下文完整性（维度感知，`context_status`）**：断链评论**不丢弃、可回收**，按可判性分级：
-- `complete`：祖先链完整到楼层根。
-- `ancestor_gap`：**直接父评论仍在**、仅更高层祖先缺失 → 局部对话完整，**四维全可标**。
-- `parent_gap`：**直接父评论缺失**（被删/未采集）→ D1/D2/D4 仍可从 target 文本判定；**D3 议题漂移不可靠**（无被回复对象），`d3_assessable=0`，卡面显示「无法判定漂移（父评论缺失）」选项，标注后但仍可从 D3 分析中排除。**D2 的立场/对象**也可能无从得知 → 出现 `stance_recoverable ∈ {yes,no,uncertain}` 人工判断（仅此类单元），标 `no` 者仅保留情感类分析。
-- 卡面标记 `context_degraded`、`anchor_degraded`、`degraded_reason`，并显示缺失父评论 rpid 与其下存活回复数（`target_meta.missing_parent_rpid / orphan_replies`）；锚点回退楼层根。
-- 实测约占候选 5.2%，且**更长、更偏实质辩论**——丢弃会引入选择偏差，故保留（详见 `scripts/analyze_broken_chain.py`）。`scripts/verify_cards.py` 逐条回查 corpus 校验。
+**标注池 = 回复评论、且祖先链完整（`complete`）**。断链（内容缺失）评论**不进入标注**，而是**归档保存**（不丢失、可日后回收）：
+- `ancestor_gap`：**直接父评论仍在**、仅更高层祖先缺失（局部对话完整）。
+- `parent_gap`：**直接父评论缺失**（被删/未采集）。
+- 归档表 `excluded_comments`，字段 `exclusion_label ∈ {ancestor_gap,parent_gap}`、`parent_present`、`orphan_replies`、原文等，逐条可查；数量见 `meta.sampling.n_archived_excluded`。
+- 可用 `--keep-degraded` 把断链评论重新纳入（标记 `context_status`），或用 `--include-roots` 把楼层根也当作候选；默认二者皆否。
+- 断链约占候选 5%+，且更长、更偏实质辩论（详见 `scripts/analyze_broken_chain.py`）——因此**归档而非删除**，便于后续单独处理。
+- `scripts/verify_cards.py` 逐条回查 corpus 校验（完整链/视频/根/anchor/path/core）。
 **不呈现 `C_extra`（溢读带）**：避免标注员的 hindsight bias；该字段留给模型/分析使用。
 
 ### 2. 量表（详见 codebook）
