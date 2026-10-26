@@ -198,3 +198,75 @@ textarea:focus, input[type=text]:focus, select:focus { border-color: var(--accen
 .adjcustom { width: 100%; margin: 4px 0 8px; }
 .adjrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .adjnote { flex: 1 1 260px; }
+
+/* ------------------------------------------------------------------ */
+/* mobile / tablet — phone-first annotation                            */
+/* ------------------------------------------------------------------ */
+@media (max-width: 760px) {
+  body { font-size: 16px; }               /* 16px avoids iOS zoom-on-focus */
+
+  .topbar {
+    flex-wrap: wrap; gap: 8px 12px;
+    padding: 8px 12px;
+  }
+  .brand { font-size: 15px; }
+  .topbar nav {
+    order: 3; width: 100%;
+    gap: 4px; overflow-x: auto; -webkit-overflow-scrolling: touch;
+    padding-bottom: 2px;
+  }
+  .topbar nav a { padding: 7px 11px; font-size: 13.5px; white-space: nowrap; }
+  .who { margin-left: 0; order: 2; margin-left: auto; gap: 6px; }
+  .who input { width: 120px; }
+
+  main { padding: 12px 12px 90px; }        /* bottom room for sticky save bar */
+  .card { padding: 14px 14px; border-radius: 12px; }
+
+  /* context blocks: give text more room */
+  .ctxlist { padding-left: 16px; }
+  .ctxlist li { font-size: 15px; }
+  .targettext { font-size: 17px; }
+
+  /* form: stack every dim's checks/meta full-width */
+  .dim { padding: 12px; }
+  .row { gap: 12px; }
+  .checks { flex: 1 1 100%; }
+  .meta { flex: 1 1 100%; }
+  .checks label, .meta label { font-size: 15px; }
+  .checks label { padding: 6px 2px; min-height: 34px; }  /* bigger touch target */
+  .checks input[type=checkbox], .checks input[type=radio] { width: 20px; height: 20px; }
+
+  select, input[type=text], textarea { font-size: 16px; padding: 9px 11px; }
+  .meta label { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .meta label.inline { flex-direction: row; align-items: center; }
+  .meta select, .meta input[type=text] { width: 100%; }
+
+  /* status bar wraps cleanly */
+  .statusbar { gap: 8px; }
+  .status-right { flex-wrap: wrap; gap: 8px; width: 100%; }
+  .pbar { flex: 1 1 100%; width: auto; }
+
+  /* big, thumb-friendly actions + sticky save */
+  .actions {
+    position: sticky; bottom: 0; z-index: 40;
+    background: var(--card);
+    margin: 14px -14px -14px; padding: 12px 14px;
+    border-top: 1px solid var(--line);
+    gap: 10px;
+  }
+  .actions .btn.primary { flex: 1; min-height: 46px; font-size: 16px; }
+  .btn { min-height: 40px; padding: 9px 14px; }
+  .btn.sm { min-height: 34px; }
+
+  /* progress / disagreement grids already stack; tighten cells */
+  .unitgrid { grid-template-columns: 1fr; max-height: none; }
+  .annrow { grid-template-columns: 92px 1fr 40px; }
+  .dimrow { grid-template-columns: 70px 1fr 64px; }
+}
+
+/* very small phones */
+@media (max-width: 380px) {
+  .brand { display: none; }
+  .who input { width: 100%; }
+  .who { flex: 1 1 100%; }
+}
