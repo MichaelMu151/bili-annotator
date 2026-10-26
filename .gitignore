@@ -7,3 +7,9 @@ __pycache__/
 .venv/
 .DS_Store
 iaa.json
+# dev-only browser-automation scaffolding (not part of the deliverable)
+node_modules/
+package.json
+package-lock.json
+_shoot.js
+_shots/

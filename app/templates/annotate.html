@@ -393,6 +393,10 @@ document.addEventListener('keydown', e=>{
   } else {
     loadNext();
   }
+  // first-run fix: typing a name when nothing is loaded should trigger a fetch
+  document.getElementById('annotator').addEventListener('input', ()=>{
+    if(!currentUnit && getAnnotator()) loadNext();
+  });
 })();
 </script>
 {% endblock %}
