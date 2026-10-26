@@ -199,6 +199,12 @@ textarea:focus, input[type=text]:focus, select:focus { border-color: var(--accen
 .adjrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .adjnote { flex: 1 1 260px; }
 
+/* offline / sync toolbar */
+.offlinebar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.offlinebar .spacer { flex: 1 1 auto; }
+.offlinebar .btn { padding: 5px 11px; }
+#netstate { font-weight: 600; }
+
 /* ------------------------------------------------------------------ */
 /* mobile / tablet — phone-first annotation                            */
 /* ------------------------------------------------------------------ */

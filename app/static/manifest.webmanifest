@@ -1,0 +1,17 @@
+{
+  "name": "BiliAnnotator 标注",
+  "short_name": "标注",
+  "description": "弹幕/评论四维话语标注：上下文卡 + D1–D4 量表",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f5f6f8",
+  "theme_color": "#1e2233",
+  "lang": "zh-CN",
+  "icons": [
+    { "src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/static/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

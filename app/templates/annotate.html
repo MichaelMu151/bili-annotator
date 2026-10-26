@@ -14,6 +14,14 @@
     </div>
   </div>
 
+  <div id="offlinebar" class="offlinebar">
+    <button id="dlbundle" class="btn ghost sm">📥 下载离线包</button>
+    <span id="bundleinfo" class="muted">未下载</span>
+    <span class="spacer"></span>
+    <span id="netstate" class="muted">…</span>
+    <button id="syncbtn" class="btn ghost sm">🔄 同步<span id="pendingn"></span></button>
+  </div>
+
   <div id="donebanner" class="donebanner" style="display:none">
     🎉 你已标注完全部单元。可前往「进度 / 质检」查看统计或导出。
   </div>
@@ -186,20 +194,96 @@ function loadNext(afterId){
   if(!a){ document.getElementById('status').textContent='请先在右上角输入标注员名字'; return; }
   let url = '/api/next?annotator=' + encodeURIComponent(a);
   if(afterId) url += '&after_id=' + afterId;
-  fetch(url).then(r=>r.json()).then(u=>{
-    document.getElementById('donebanner').style.display = u.done ? 'block':'none';
-    if(u.done){ document.getElementById('card').innerHTML=''; setProgress(lastPos,lastPos); return; }
-    currentUnit = u; startTime = Date.now(); renderUnit(u);
-    refreshMyTotal();
-  });
+  fetch(url).then(r=>{ if(!r.ok) throw 0; return r.json(); })
+    .then(u=>handleNext(u))
+    .catch(()=>offlineNext(afterId));
+}
+
+function handleNext(u){
+  document.getElementById('donebanner').style.display = u.done ? 'block':'none';
+  if(u.done){ document.getElementById('card').innerHTML=''; setProgress(lastPos,lastPos); return; }
+  currentUnit = u; startTime = Date.now(); renderUnit(u); refreshMyTotal();
+}
+
+async function offlineNext(afterId){
+  const b = await getBundle();
+  if(!b){ document.getElementById('status').textContent='离线且无离线包，请联网后点「📥 下载离线包」'; document.getElementById('card').innerHTML=''; return; }
+  document.getElementById('donebanner').style.display='none';
+  const done = getDone();
+  let pool = b.units.filter(x=>!done.has(x.id)).sort((x,y)=>x.id-y.id);
+  if(!pool.length){ document.getElementById('donebanner').style.display='block'; document.getElementById('card').innerHTML=''; return; }
+  let next = (afterId ? pool.find(x=>x.id>afterId) : null) || pool[0];
+  next = JSON.parse(JSON.stringify(next)); next.existing=null;
+  currentUnit = next; startTime = Date.now(); renderUnit(next);
+  setProgress(done.size + 1, b.total);
 }
 
 function refreshMyTotal(){
+  if(!navigator.onLine){ refreshOfflineTotal(); return; }
   fetch('/api/stats').then(r=>r.json()).then(s=>{
     const mine = (s.annotators.find(x=>x.annotator===getAnnotator())||{}).count||0;
     lastPos = mine;
     setProgress(mine + 1, s.total_units);
-  });
+  }).catch(()=>refreshOfflineTotal());
+}
+
+async function refreshOfflineTotal(){
+  const b = await getBundle(); const done = getDone();
+  if(b){ lastPos = done.size; setProgress(done.size + 1, b.total); }
+}
+
+// ---- offline storage: bundle in IndexedDB, queue/done in localStorage ----
+const IDB = {
+  _p: null,
+  open(){
+    if(this._p) return this._p;
+    this._p = new Promise((res,rej)=>{
+      const r = indexedDB.open('bili-annot', 1);
+      r.onupgradeneeded = ()=>{ if(!r.result.objectStoreNames.contains('kv')) r.result.createObjectStore('kv'); };
+      r.onsuccess = ()=>res(r.result); r.onerror = ()=>rej(r.error);
+    });
+    return this._p;
+  },
+  async get(k){ try{ const db=await this.open(); return await new Promise(res=>{ const t=db.transaction('kv','readonly').objectStore('kv').get(k); t.onsuccess=()=>res(t.result); t.onerror=()=>res(undefined); }); }catch(e){ return undefined; } },
+  async set(k,v){ try{ const db=await this.open(); await new Promise(res=>{ const tx=db.transaction('kv','readwrite'); tx.objectStore('kv').put(v,k); tx.oncomplete=()=>res(); tx.onerror=()=>res(); }); }catch(e){} }
+};
+const qKey=()=>'queue:'+getAnnotator();
+const dKey=()=>'done:'+getAnnotator();
+function getQueue(){ try{ return JSON.parse(localStorage.getItem(qKey())||'{}'); }catch(e){ return {}; } }
+function setQueue(q){ try{ localStorage.setItem(qKey(), JSON.stringify(q)); }catch(e){} updatePending(); }
+function getDone(){ try{ return new Set(JSON.parse(localStorage.getItem(dKey())||'[]')); }catch(e){ return new Set(); } }
+function setDone(s){ try{ localStorage.setItem(dKey(), JSON.stringify([...s])); }catch(e){} }
+function updatePending(){ const el=document.getElementById('pendingn'); if(el){ const n=Object.keys(getQueue()).length; el.textContent = n? ` (${n})` : ''; } }
+function setNetState(){ const el=document.getElementById('netstate'); if(el) el.textContent = navigator.onLine ? '● 在线' : '○ 离线'; }
+
+async function getBundle(){ return await IDB.get('bundle'); }
+async function downloadBundle(){
+  const st=document.getElementById('bundleinfo');
+  try{
+    const r=await fetch('/api/offline_bundle'); if(!r.ok) throw 0;
+    const b=await r.json(); await IDB.set('bundle', b);
+    st.textContent = `离线包：${b.total} 条`;
+    setSaveState('离线包就绪 ✓','good');
+  }catch(e){ st.textContent='下载失败（需联网）'; }
+}
+
+async function flushQueue(){
+  const a=getAnnotator(); if(!a) return;
+  const q=getQueue(); const ids=Object.keys(q); if(!ids.length) return;
+  const items=ids.map(id=>({ unit_id:+id, payload:q[id].payload, duration_ms:q[id].duration_ms, client_ts:q[id].client_ts }));
+  try{
+    const r=await fetch('/api/sync',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({annotator:a,items})});
+    const d=await r.json();
+    if(r.ok && d.ok){ const nq=getQueue(); (d.results||[]).forEach(x=>{ if(x.ok) delete nq[x.unit_id]; }); setQueue(nq); setSaveState(`已同步 ${d.synced} 条 ✓`,'good'); }
+  }catch(e){}
+}
+
+async function syncDoneFromServer(){
+  const a=getAnnotator(); if(!a) return;
+  try{
+    const r=await fetch('/api/units?annotator='+encodeURIComponent(a)); const rows=await r.json();
+    const done=getDone(); rows.forEach(x=>{ if(x.status==='done') done.add(x.id); }); setDone(done);
+  }catch(e){}
 }
 
 function renderUnit(u){
@@ -343,6 +427,12 @@ function restoreDraft(){ try{ const d=localStorage.getItem(draftKey()); if(d) pr
 let saving = false;
 function setSaveState(msg, cls){ const el=document.getElementById('savestate'); if(el){ el.textContent=msg; el.className='muted '+(cls||''); } }
 
+function persistLocal(payload, duration){
+  const q=getQueue(); q[currentUnit.id]={payload, duration_ms:duration, client_ts:Date.now()}; setQueue(q);
+  const done=getDone(); done.add(currentUnit.id); setDone(done);
+}
+function advance(){ localStorage.removeItem(draftKey()); const id=currentUnit.id; loadNext(id); }
+
 document.getElementById('form').addEventListener('submit', e=>{
   e.preventDefault();
   if(!currentUnit || saving){ return; }
@@ -350,16 +440,19 @@ document.getElementById('form').addEventListener('submit', e=>{
   const payload=collectPayload();
   const err=validate(payload); if(err){ setSaveState('⚠ '+err,'bad'); return; }
   const duration = Date.now()-startTime;
-  saving = true; setSaveState('保存中…','');
+  persistLocal(payload, duration);            // durable locally FIRST (works offline)
+  saving = true;
+  if(!navigator.onLine){ setSaveState('已本地保存（离线）✓','good'); saving=false; advance(); return; }
+  setSaveState('保存中…','');
   fetch('/api/annotate',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({unit_id:currentUnit.id, annotator:a, payload, duration_ms:duration})})
   .then(r=>r.json().then(d=>({ok:r.ok, d})))
   .then(({ok,d})=>{
-    if(ok && d.ok){ localStorage.removeItem(draftKey()); setSaveState('已保存 ✓','good'); loadNext(currentUnit.id); }
-    else{ setSaveState('保存失败：'+(d.error||''),'bad'); }
+    if(ok && d.ok){ const q=getQueue(); delete q[currentUnit.id]; setQueue(q); setSaveState('已保存 ✓','good'); }
+    else { const q=getQueue(); delete q[currentUnit.id]; setQueue(q); setSaveState('保存被拒：'+(d.error||''),'bad'); }
   })
-  .catch(()=>setSaveState('网络错误，请重试','bad'))
-  .finally(()=>{ saving=false; });
+  .catch(()=>setSaveState('已本地保存（离线，待同步）✓','good'))
+  .finally(()=>{ saving=false; advance(); });
 });
 
 document.getElementById('skip').onclick = ()=>{ if(currentUnit) loadNext(currentUnit.id); };
@@ -381,21 +474,32 @@ document.addEventListener('keydown', e=>{
   if((e.metaKey||e.ctrlKey) && e.key==='Enter'){ document.getElementById('form').requestSubmit(); }
 });
 
+document.getElementById('dlbundle').onclick = downloadBundle;
+document.getElementById('syncbtn').onclick = ()=>flushQueue();
+window.addEventListener('online', ()=>{ setNetState(); flushQueue(); });
+window.addEventListener('offline', setNetState);
+
 (function boot(){
+  setNetState(); updatePending();
   const q = new URLSearchParams(location.search);
   const uid = q.get('unit');
-  if(uid){
-    const a = getAnnotator();
-    fetch('/api/unit/'+uid+'?annotator='+encodeURIComponent(a))
-      .then(r=>{ if(!r.ok) throw 0; return r.json(); })
-      .then(u=>{ currentUnit=u; startTime=Date.now(); renderUnit(u); refreshMyTotal(); })
-      .catch(()=>loadNext());
-  } else {
+  (async ()=>{
+    if(navigator.onLine && getAnnotator()){ await flushQueue(); await syncDoneFromServer(); }
+    if(uid){
+      try{
+        const r = await fetch('/api/unit/'+uid+'?annotator='+encodeURIComponent(getAnnotator()));
+        if(!r.ok) throw 0; const u = await r.json();
+        currentUnit=u; startTime=Date.now(); renderUnit(u); refreshMyTotal(); return;
+      }catch(e){}
+    }
     loadNext();
-  }
-  // first-run fix: typing a name when nothing is loaded should trigger a fetch
-  document.getElementById('annotator').addEventListener('input', ()=>{
-    if(!currentUnit && getAnnotator()) loadNext();
+  })();
+  // first-run: typing a name when nothing is loaded triggers fetch/sync
+  document.getElementById('annotator').addEventListener('input', async ()=>{
+    if(currentUnit || !getAnnotator()) return;
+    updatePending();
+    if(navigator.onLine){ await flushQueue(); await syncDoneFromServer(); }
+    loadNext();
   });
 })();
 </script>

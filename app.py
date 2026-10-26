@@ -139,6 +139,19 @@ def disagree():
     return render_template("disagree.html")
 
 
+# PWA at root scope (service worker must be served from / to control the site)
+@app.get("/sw.js")
+def service_worker():
+    return app.send_static_file("sw.js")
+
+
+@app.get("/manifest.webmanifest")
+def pwa_manifest():
+    resp = app.send_static_file("manifest.webmanifest")
+    resp.mimetype = "application/manifest+json"
+    return resp
+
+
 # --------------------------------------------------------------------------- #
 # API — meta / navigation
 # --------------------------------------------------------------------------- #
@@ -221,6 +234,61 @@ def api_units():
             "status": "done" if r["id"] in done else "todo",
         })
     return jsonify(out)
+
+
+@app.get("/api/offline_bundle")
+def api_offline_bundle():
+    """Full set of units for offline annotation (cached client-side in IndexedDB)."""
+    conn = db()
+    rows = conn.execute("select * from units order by id").fetchall()
+    conn.close()
+    units = [row_to_unit(r) for r in rows]
+    return jsonify({"version": PAYLOAD_SCHEMA, "generated_at": int(time.time()),
+                    "total": len(units), "units": units})
+
+
+@app.post("/api/sync")
+def api_sync():
+    """Batch upload of annotations made offline. Idempotent per (unit, annotator)."""
+    data = request.get_json(force=True, silent=True) or {}
+    annotator = (data.get("annotator") or "").strip()
+    items = data.get("items") or []
+    if not annotator or not isinstance(items, list):
+        return jsonify({"error": "annotator and items[] required"}), 400
+    now = int(time.time())
+    conn = db()
+    results = []
+    synced = 0
+    for it in items:
+        uid = it.get("unit_id") if isinstance(it, dict) else None
+        payload = it.get("payload") if isinstance(it, dict) else None
+        try:
+            if not isinstance(uid, int):
+                raise ValueError("bad unit_id")
+            _validate_payload(payload)
+            trow = conn.execute("select target_rpid from units where id=?", (uid,)).fetchone()
+            if trow is None:
+                raise ValueError("unit not found")
+            try:
+                duration = int(it.get("duration_ms")) if it.get("duration_ms") is not None else None
+            except (TypeError, ValueError):
+                duration = None
+            conn.execute(
+                "insert into annotations(unit_id,annotator,payload_json,schema_version,"
+                "duration_ms,target_rpid,created_at,updated_at) values(?,?,?,?,?,?,?,?) "
+                "on conflict(unit_id, annotator) do update set "
+                "payload_json=excluded.payload_json, schema_version=excluded.schema_version, "
+                "duration_ms=excluded.duration_ms, target_rpid=excluded.target_rpid, "
+                "updated_at=excluded.updated_at",
+                (uid, annotator, json.dumps(payload, ensure_ascii=False),
+                 PAYLOAD_SCHEMA, duration, trow["target_rpid"], now, now))
+            results.append({"unit_id": uid, "ok": True})
+            synced += 1
+        except Exception as e:  # noqa: BLE001
+            results.append({"unit_id": uid, "ok": False, "error": str(e)})
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True, "synced": synced, "results": results})
 
 
 # --------------------------------------------------------------------------- #
