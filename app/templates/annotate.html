@@ -308,19 +308,26 @@ function validate(payload){
 function saveDraft(){ try{ localStorage.setItem(draftKey(), JSON.stringify(collectPayload())); }catch(e){} }
 function restoreDraft(){ try{ const d=localStorage.getItem(draftKey()); if(d) prefill(JSON.parse(d)); }catch(e){} }
 
+let saving = false;
+function setSaveState(msg, cls){ const el=document.getElementById('savestate'); if(el){ el.textContent=msg; el.className='muted '+(cls||''); } }
+
 document.getElementById('form').addEventListener('submit', e=>{
   e.preventDefault();
-  if(!currentUnit){ return; }
-  const a=getAnnotator(); if(!a){ alert('请先输入标注员名字'); return; }
+  if(!currentUnit || saving){ return; }
+  const a=getAnnotator(); if(!a){ alert('请先输入标注员名字'); document.getElementById('annotator').focus(); return; }
   const payload=collectPayload();
-  const err=validate(payload); if(err){ alert(err); return; }
+  const err=validate(payload); if(err){ setSaveState('⚠ '+err,'bad'); return; }
   const duration = Date.now()-startTime;
+  saving = true; setSaveState('保存中…','');
   fetch('/api/annotate',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({unit_id:currentUnit.id, annotator:a, payload, duration_ms:duration})})
-  .then(r=>r.json()).then(d=>{
-    if(d.ok){ localStorage.removeItem(draftKey()); loadNext(currentUnit.id); }
-    else{ alert('保存失败：'+(d.error||'')); }
-  });
+  .then(r=>r.json().then(d=>({ok:r.ok, d})))
+  .then(({ok,d})=>{
+    if(ok && d.ok){ localStorage.removeItem(draftKey()); setSaveState('已保存 ✓','good'); loadNext(currentUnit.id); }
+    else{ setSaveState('保存失败：'+(d.error||''),'bad'); }
+  })
+  .catch(()=>setSaveState('网络错误，请重试','bad'))
+  .finally(()=>{ saving=false; });
 });
 
 document.getElementById('skip').onclick = ()=>{ if(currentUnit) loadNext(currentUnit.id); };

@@ -13,8 +13,17 @@
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
-python app.py            # http://127.0.0.1:5005
+python app.py            # http://127.0.0.1:5005 （只绑定本机）
 ```
+
+如需让同事通过局域网访问：
+
+```bash
+ANNOTATOR_HOST=0.0.0.0 python app.py
+```
+
+> 出于安全，`debug` 仅在绑定 `127.0.0.1/localhost` 且显式 `ANNOTATOR_DEBUG=1` 时开启，
+> 公网接口**永不**启动 Werkzeug 调试器（否则有 RCE 风险）。
 
 三个界面：
 
@@ -51,13 +60,17 @@ python app.py            # http://127.0.0.1:5005
 - 分层键：`topic × floor_heat × depth × polarity × flagtype × length`
 - 配额 `∝ sqrt(stratum_size)`，覆盖长尾而不被大层淹没
 - **seed 持久化**在 `meta.sampling.seed`；候选按 `rpid`、楼层按 `(pub_ts, rpid)` 排序，**重建结果逐条一致**
+- `inclusion_prob` 在 trim/top-up **之后**由**实际入选数**重算为 `n_h / N_h`（分层 SRSWOR 一阶入样概率），
+  因此 `Horvitz–Thompson` 加权**无偏**——这点在初版里是错的（用了 trim 前的配额），已修正并用单测守护
 - 每条单元存 `stratum_key / stratum_n / inclusion_prob / sampled_by` → 下游可用**入样概率加权**回推总体
 
-### 4. 数据完整性与可溯源
+### 4. 数据完整性与校验
+- **服务端全字段校验**：D1/D2 标签必须属于 canonical 集合且 `primary ∈ labels`；D3.type/extent、
+  D4 极性/唤醒/毒性、confidence 全部按 codebook 枚举校验；**空标注**（未填任何维度且未标 ambiguous）被拒绝
 - `annotations.target_rpid`：标注时快照目标评论；导出含 `integrity_ok`，**重建抽样也不会把标注错接到别的评论**
+- 竞态安全：保存用 `INSERT … ON CONFLICT(unit_id,annotator) DO UPDATE` 原子 upsert
 - `annotations.schema_version` / `duration_ms`：可做标注质量与效率分析
-- WAL + `busy_timeout`：多人同时标注安全
-- 重建会**拒绝覆盖已有标注**（除非 `--force`）
+- WAL + `busy_timeout`：多人同时标注安全；重建会**拒绝覆盖已有标注**（除非 `--force`）
 
 ### 5. 一致性（IAA）
 ```bash

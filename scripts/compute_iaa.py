@@ -35,6 +35,35 @@ D1_LABELS = ("1.1", "1.2", "1.3", "1.4", "1.5")
 D2_LABELS = ("2.1", "2.2", "2.3", "2.4", "2.5")
 
 
+# Human-readable code → short name, so the IAA report matches the codebook.
+D1_NAMES = {"1.1": "反讽/倒置", "1.2": "嘲讽/挖苦", "1.3": "犬儒虚无/解构",
+            "1.4": "自嘲/苦情", "1.5": "直白陈述"}
+D2_NAMES = {"2.1": "建设性论辩", "2.2": "情绪共鸣/连带", "2.3": "动机怀疑/诛心",
+            "2.4": "纯泄愤/对抗", "2.5": "虚无解构/劝退"}
+D3_NAMES = {"3.1": "议题聚焦", "3.2": "合理延展", "3.3": "离题转移", "3.4": "元争论"}
+
+
+def _name(dim, code):
+    table = {"D1": D1_NAMES, "D2": D2_NAMES, "D3": D3_NAMES}.get(dim, {})
+    nm = table.get(code)
+    return f"{code} {nm}" if nm else code
+
+
+def _status(a) -> str:
+    """Human-readable reliability verdict against conventional alpha thresholds."""
+    if a is None:
+        return "n/a (样本不足/无重叠)"
+    if a >= 0.80:
+        return "✓ 可靠"
+    if a >= 0.67:
+        return "⚠ 探索性可接受"
+    return "✗ 需修订 codebook / 合并类"
+
+
+def fmt(a) -> str:
+    return "None" if a is None else f"{a:.3f}"
+
+
 # --------------------------------------------------------------------------- #
 # Krippendorff's alpha
 # --------------------------------------------------------------------------- #
@@ -212,14 +241,14 @@ def main():
         for lab in D1_LABELS:
             a = krippendorff_alpha(multi_label_units(data, "D1", lab))
             report["per_label"][f"D1.{lab}"] = a
-            print(f"  1.{lab.split('.')[1]}: alpha = {a if a is None else round(a,3)}")
+            print(f"  {_name('D1', lab):<16} alpha = {fmt(a):<7} {_status(a)}")
 
     if args.dim in ("all", "D2"):
         print("\n== D2 语用动机（多标签，逐标签二值 alpha） ==")
         for lab in D2_LABELS:
             a = krippendorff_alpha(multi_label_units(data, "D2", lab))
             report["per_label"][f"D2.{lab}"] = a
-            print(f"  {lab}: alpha = {a if a is None else round(a,3)}")
+            print(f"  {_name('D2', lab):<16} alpha = {fmt(a):<7} {_status(a)}")
 
     if args.dim in ("all", "D3"):
         print("\n== D3 议题漂移 ==")
@@ -228,16 +257,24 @@ def main():
                                    level="ordinal", order=["1", "2", "3", "4"])
         report["D3.type_alpha"] = a_type
         report["D3.extent_alpha_ordinal"] = a_ext
-        print(f"  type (nominal): alpha = {a_type if a_type is None else round(a_type,3)}")
-        print(f"  extent (ordinal): alpha = {a_ext if a_ext is None else round(a_ext,3)}")
+        print(f"  type (nominal):   alpha = {fmt(a_type)}")
+        print(f"  extent (ordinal): alpha = {fmt(a_ext)}")
         a1, a2, pairs = paired(data, "D3", "type")
         if pairs:
             k = cohens_kappa([p[1] for p in pairs], [p[2] for p in pairs])
             report["D3.type_kappa"] = k
-            print(f"  type Cohen's kappa ({a1} vs {a2}, n={len(pairs)}) = "
-                  f"{k if k is None else round(k,3)}")
+            print(f"  type Cohen's kappa ({a1} vs {a2}, n={len(pairs)}) = {fmt(k)}")
             conf = Counter((p[1], p[2]) for p in pairs)
-            print("  confusion(type):", dict(conf))
+            diag = sum(v for (x, y), v in conf.items() if x == y)
+            print(f"  raw agreement = {diag}/{len(pairs)} = "
+                  f"{round(diag / len(pairs) * 100, 1)}%")
+            print("  confusion(type) [row=rater1, col=rater2]:")
+            types = sorted({x for x, _ in conf} | {y for _, y in conf})
+            hdr = "        " + " ".join(f"{t:>6}" for t in types)
+            print(hdr)
+            for x in types:
+                cells = " ".join(f"{conf.get((x, y), 0):>6}" for y in types)
+                print(f"    {x:>4} {cells}")
 
     if args.dim in ("all", "D4"):
         print("\n== D4 情感与毒性 ==")
@@ -249,15 +286,21 @@ def main():
         report["D4.polarity_alpha_ordinal"] = a_pol
         report["D4.toxicity_alpha_ordinal"] = a_tox
         report["D4.arousal_alpha_nominal"] = a_aro
-        print(f"  polarity (ordinal): alpha = {a_pol if a_pol is None else round(a_pol,3)}")
-        print(f"  toxicity (ordinal): alpha = {a_tox if a_tox is None else round(a_tox,3)}")
-        print(f"  arousal (nominal):  alpha = {a_aro if a_aro is None else round(a_aro,3)}")
+        print(f"  polarity (ordinal): alpha = {fmt(a_pol):<7} {_status(a_pol)}")
+        print(f"  toxicity (ordinal): alpha = {fmt(a_tox):<7} {_status(a_tox)}")
+        print(f"  arousal (nominal):  alpha = {fmt(a_aro):<7} {_status(a_aro)}")
 
     print("\n== 判定阈值（学术惯例） ==")
     print("  alpha >= 0.80 可靠；0.67-0.80 探索性可接受；< 0.67 需修订 codebook 或合并类")
     bad = [k for k, v in report["per_label"].items() if v is not None and v < 0.67]
     if bad:
         print("  !! 低于 0.67 的标签:", bad)
+    else:
+        ok = [k for k, v in report["per_label"].items() if v is not None]
+        if ok:
+            print("  所有可计算标签均 >= 0.67 ✓")
+        else:
+            print("  （暂无可计算的标签级 alpha：需 ≥2 名标注员重叠标注同一批单元）")
 
     if args.out:
         Path(args.out).write_text(json.dumps(report, ensure_ascii=False, indent=2),

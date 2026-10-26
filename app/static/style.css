@@ -137,6 +137,8 @@ textarea:focus, input[type=text]:focus, select:focus { border-color: var(--accen
 .btn.sm { padding: 5px 11px; font-size: 13px; }
 
 .muted { color: var(--muted); font-size: 13px; }
+.muted.good { color: var(--good); font-weight: 600; }
+.muted.bad { color: var(--bad); font-weight: 600; }
 
 /* codebook prose */
 .prose { font-size: 15px; }

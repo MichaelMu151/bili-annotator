@@ -36,6 +36,16 @@ CODEBOOK_PATH = ROOT / "codebook" / "CODEBOOK.md"
 PAYLOAD_SCHEMA = "1.0"
 DIMS = ("D1", "D2", "D3", "D4")
 
+# Canonical label sets — the single source of truth, mirroring CODEBOOK.md.
+D1_LABELS = {"1.1", "1.2", "1.3", "1.4", "1.5"}
+D2_LABELS = {"2.1", "2.2", "2.3", "2.4", "2.5"}
+D3_TYPES = {"3.1", "3.2", "3.3", "3.4"}
+D3_EXTENTS = {"1", "2", "3", "4"}
+D4_POLARITY = {"-1", "0", "1"}
+D4_AROUSAL = {"low", "high"}
+D4_TOXICITY = {"0", "1", "2", "3"}
+CONFIDENCE = {"high", "medium", "low"}
+
 app = Flask(__name__, template_folder="app/templates", static_folder="app/static")
 
 
@@ -191,18 +201,64 @@ def api_units():
 # API — writes
 # --------------------------------------------------------------------------- #
 def _validate_payload(payload: dict) -> None:
+    """Server-side validation of the full payload against the codebook domains.
+
+    Mirrors the client checks but is authoritative: a tampered/aborted request
+    can never write an out-of-domain value into the gold set.
+    """
     if not isinstance(payload, dict):
         raise ValueError("payload must be an object")
+
     for dim in DIMS:
         val = payload.get(dim)
         if val is not None and not isinstance(val, dict):
             raise ValueError(f"{dim} must be an object")
-    # primary must be among labels when both provided
-    for dim in ("D1", "D2"):
+
+    # D1 / D2: multi-label subset of canonical codes + primary must be in labels
+    for dim, domain in (("D1", D1_LABELS), ("D2", D2_LABELS)):
         v = payload.get(dim) or {}
-        labels, primary = v.get("labels") or [], v.get("primary")
+        labels = v.get("labels") or []
+        if not isinstance(labels, list):
+            raise ValueError(f"{dim}.labels must be a list")
+        bad = set(labels) - domain
+        if bad:
+            raise ValueError(f"{dim}.labels contains invalid codes {sorted(bad)}")
+        primary = v.get("primary")
         if primary and primary not in labels:
             raise ValueError(f"{dim}.primary {primary!r} not in labels {labels}")
+        if primary and primary not in domain:
+            raise ValueError(f"{dim}.primary {primary!r} not a valid code")
+
+    # D3: single type from domain, extent ordinal 1-4
+    d3 = payload.get("D3") or {}
+    if d3.get("type") and d3["type"] not in D3_TYPES:
+        raise ValueError(f"D3.type {d3['type']!r} invalid")
+    if d3.get("extent") not in (None, "") and str(d3["extent"]) not in D3_EXTENTS:
+        raise ValueError(f"D3.extent {d3['extent']!r} invalid (want 1-4)")
+
+    # D4: polarity/arousal/toxicity enums
+    d4 = payload.get("D4") or {}
+    if d4.get("polarity") not in (None, "") and str(d4["polarity"]) not in D4_POLARITY:
+        raise ValueError(f"D4.polarity {d4['polarity']!r} invalid")
+    if d4.get("arousal") not in (None, "") and d4["arousal"] not in D4_AROUSAL:
+        raise ValueError(f"D4.arousal {d4['arousal']!r} invalid")
+    if d4.get("toxicity") not in (None, "") and str(d4["toxicity"]) not in D4_TOXICITY:
+        raise ValueError(f"D4.toxicity {d4['toxicity']!r} invalid")
+
+    if payload.get("confidence") not in (None, "") and \
+            payload["confidence"] not in CONFIDENCE:
+        raise ValueError(f"confidence {payload['confidence']!r} invalid")
+
+    # Reject a completely empty annotation: an item must carry at least one
+    # substantive judgement or be explicitly flagged ambiguous.
+    d1h = bool((payload.get("D1") or {}).get("labels") or (payload.get("D1") or {}).get("primary"))
+    d2h = bool((payload.get("D2") or {}).get("labels") or (payload.get("D2") or {}).get("primary"))
+    d3h = bool((payload.get("D3") or {}).get("type"))
+    d4h = (payload.get("D4") or {}).get("polarity") not in (None, "") or \
+          (payload.get("D4") or {}).get("toxicity") not in (None, "") or \
+          (payload.get("D4") or {}).get("arousal") not in (None, "")
+    if not (d1h or d2h or d3h or d4h or payload.get("ambiguous")):
+        raise ValueError("empty annotation: fill at least one dimension or mark ambiguous")
 
 
 @app.post("/api/annotate")
@@ -233,19 +289,16 @@ def api_annotate():
         conn.close()
         return jsonify({"error": f"unit {unit_id} not found"}), 404
     target_rpid = trow["target_rpid"]
-    exists = conn.execute(
-        "select id from annotations where unit_id=? and annotator=?",
-        (unit_id, annotator)).fetchone()
-    if exists:
-        conn.execute(
-            "update annotations set payload_json=?, schema_version=?, duration_ms=?, "
-            "target_rpid=?, updated_at=? where id=?",
-            (pj, PAYLOAD_SCHEMA, duration, target_rpid, now, exists["id"]))
-    else:
-        conn.execute(
-            "insert into annotations(unit_id,annotator,payload_json,schema_version,"
-            "duration_ms,target_rpid,created_at,updated_at) values(?,?,?,?,?,?,?,?)",
-            (unit_id, annotator, pj, PAYLOAD_SCHEMA, duration, target_rpid, now, now))
+    # Atomic upsert on the UNIQUE(unit_id, annotator) key — no read-then-write
+    # race under concurrent saves from the same annotator (e.g. double submit).
+    conn.execute(
+        "insert into annotations(unit_id,annotator,payload_json,schema_version,"
+        "duration_ms,target_rpid,created_at,updated_at) values(?,?,?,?,?,?,?,?) "
+        "on conflict(unit_id,annotator) do update set "
+        "payload_json=excluded.payload_json, schema_version=excluded.schema_version, "
+        "duration_ms=excluded.duration_ms, target_rpid=excluded.target_rpid, "
+        "updated_at=excluded.updated_at",
+        (unit_id, annotator, pj, PAYLOAD_SCHEMA, duration, target_rpid, now, now))
     conn.commit()
     conn.close()
     return jsonify({"ok": True})
@@ -370,4 +423,10 @@ def api_export():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5005, debug=True)
+    import os
+    # Bind to localhost by default; opt into LAN sharing explicitly. Never run
+    # the Werkzeug debugger on a public interface — it allows code execution.
+    host = os.environ.get("ANNOTATOR_HOST", "127.0.0.1")
+    port = int(os.environ.get("ANNOTATOR_PORT", "5005"))
+    debug = os.environ.get("ANNOTATOR_DEBUG") == "1" and host in ("127.0.0.1", "localhost")
+    app.run(host=host, port=port, debug=debug, use_reloader=debug)

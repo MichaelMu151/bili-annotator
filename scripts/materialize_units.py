@@ -288,53 +288,63 @@ def process_video(con, bvid, meta) -> list[tuple]:
 
 # ----------------------------- stratified sample ----------------------------- #
 def stratified_sample(cands: list[tuple], target: int, seed: int) -> dict[str, dict]:
-    """Return {rpid: {stratum_key, stratum_n, inclusion_prob, sampled_by}}.
+    """Stratified sample with *correct* first-order inclusion probabilities.
 
-    Deterministic: strata iterated in sorted order; pools shuffled with `seed`.
+    Design: stratified SRSWOR with quota ∝ sqrt(stratum_size), min 1, capped at
+    the stratum size; the union is then trimmed/ topped-up to exactly ``target``.
+
+    Crucially, ``inclusion_prob`` is recomputed from the **realised** number of
+    selected units per stratum (``n_h / N_h``) *after* the trim/top-up step —
+    not from the pre-trim quota. This keeps the recorded design consistent with
+    what was actually sampled, so downstream Horvitz–Thompson reweighting is
+    unbiased. Deterministic: every ordering is sorted, every shuffle seeded.
     """
     by_stratum: dict[str, list[str]] = defaultdict(list)
     for rpid, skey, bvid in cands:
         by_stratum[skey].append(rpid)
     for k in by_stratum:
-        by_stratum[k].sort()  # deterministic pool order before shuffle
+        by_stratum[k].sort()
 
     rng = random.Random(seed)
-    keys = sorted(by_stratum.keys())
+    keys = sorted(by_stratum)
     weights = {k: math.sqrt(len(by_stratum[k])) for k in keys}
     total_w = sum(weights.values()) or 1.0
 
-    picked: dict[str, dict] = {}
+    # 1) per-stratum quota -> shuffled prefix selection
+    selected: list[tuple[str, str]] = []  # (stratum_key, rpid)
     for k in keys:
-        pool = by_stratum[k]
         quota = max(1, round(target * weights[k] / total_w))
-        quota = min(quota, len(pool))
-        shuffled = pool[:]
-        rng.shuffle(shuffled)
-        for rpid in shuffled[:quota]:
-            picked[rpid] = {
-                "stratum_key": k,
-                "stratum_n": len(pool),
-                "inclusion_prob": round(quota / len(pool), 6),
-                "sampled_by": "quota",
-            }
+        quota = min(quota, len(by_stratum[k]))
+        pool = by_stratum[k][:]
+        rng.shuffle(pool)
+        selected.extend((k, r) for r in pool[:quota])
 
-    chosen = list(picked.keys())
-    rng.shuffle(chosen)
-    if len(chosen) > target:
-        chosen = chosen[:target]
-        picked = {r: picked[r] for r in chosen}
-    elif len(chosen) < target:
-        picked_set = set(chosen)
-        leftover = sorted(r for r, _, _ in cands if r not in picked_set)
+    # 2) exact-size adjustment (random but seeded)
+    rng.shuffle(selected)
+    if len(selected) > target:
+        selected = selected[:target]
+    elif len(selected) < target:
+        chosen_set = {r for _, r in selected}
+        skey_of = {r: sk for r, sk, _ in cands}
+        leftover = sorted(r for r, _, _ in cands if r not in chosen_set)
         rng.shuffle(leftover)
-        # leftover units get the average stratum inclusion prob (approx)
-        for rpid in leftover[: target - len(chosen)]:
-            skey = next(sk for rp, sk, bv in cands if rp == rpid)
-            n = len(by_stratum[skey])
-            picked[rpid] = {
-                "stratum_key": skey, "stratum_n": n,
-                "inclusion_prob": round(1.0 / n, 6), "sampled_by": "topup",
-            }
+        for r in leftover[: target - len(selected)]:
+            selected.append((skey_of[r], r))
+
+    # 3) recompute inclusion probability from the REALISED per-stratum counts
+    final_n = defaultdict(int)
+    for k, _ in selected:
+        final_n[k] += 1
+    picked: dict[str, dict] = {}
+    for k, r in selected:
+        N = len(by_stratum[k])
+        n = final_n[k]
+        picked[r] = {
+            "stratum_key": k,
+            "stratum_n": N,
+            "inclusion_prob": round(n / N, 6),
+            "sampled_by": "stratified_srswor",
+        }
     return picked
 
 
