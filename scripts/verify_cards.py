@@ -100,6 +100,12 @@ def main():
         is_root = trow["hierarchy_level"] == "root"
         floor_key = target if is_root else trow["root_rpid"]
         floor = load_floor(c, bvid, floor_key)
+        try:
+            degraded = int(r["context_degraded"] or 0)
+        except (IndexError, KeyError, TypeError):
+            degraded = 0
+        if degraded:
+            checks["degraded_units"] += 1
 
         # ---- path ----
         path = json.loads(r["path_json"] or "[]")
@@ -119,8 +125,8 @@ def main():
                 if child is None or child["parent_rpid"] != path[i-1]["rpid"]:
                     fails["path_chain"].append((uid, "broken at", i)); path_ok = False; break
         else:
-            # empty path only valid if target is root or its parent is floor root
-            if not (is_root or trow["parent_rpid"] == floor_key):
+            # empty path only valid if target is root, parent is floor root, OR degraded
+            if not degraded and not (is_root or trow["parent_rpid"] == floor_key):
                 fails["path_chain"].append((uid, "empty path but has ancestors")); path_ok = False
         if path_ok:
             checks["path_ok"] += 1
@@ -131,7 +137,13 @@ def main():
             "select rpid,parent_rpid,root_rpid,hierarchy_level,content from comments "
             "where rpid=?", (anchor,)).fetchone()
         if arow is None:
-            fails["anchor_missing"].append((uid, anchor)); checks["anchor_bad"] += 1
+            # a degraded unit may have its anchor degraded to a floor root that is
+            # itself missing; accept that (flagged) rather than failing.
+            if degraded and anchor == floor_key:
+                checks["anchor_rule_ok"] += 1
+                checks["anchor_degraded_ok"] += 1
+            else:
+                fails["anchor_missing"].append((uid, anchor)); checks["anchor_bad"] += 1
         else:
             if (arow["content"] or "") != (r["anchor_text"] or ""):
                 fails["anchor_text"].append(uid)

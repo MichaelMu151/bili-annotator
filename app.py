@@ -516,11 +516,14 @@ def api_stats():
                 dim_filled[d] += 1
         if p.get("ambiguous"):
             ambiguous += 1
+    total_degraded = conn.execute(
+        "select count(*) from units where context_degraded=1").fetchone()[0]
     conn.close()
     annotators = [{"annotator": k, "count": v}
                   for k, v in sorted(by_ann.items(), key=lambda kv: -kv[1])]
     return jsonify({
         "total_units": total,
+        "total_degraded": total_degraded,
         "units_covered": covered,
         "coverage_pct": round(covered / total * 100, 1) if total else 0.0,
         "annotations_total": len(anns),
@@ -537,6 +540,7 @@ def api_export():
     conn = db()
     q = ("select u.id unit_id, u.bvid, u.target_rpid, u.target_user, u.target_text, "
          "u.stratum_key, u.stratum_n, u.inclusion_prob, u.video_title, "
+         "u.context_degraded, u.degraded_reason, "
          "a.annotator, a.payload_json, a.created_at, a.updated_at, a.duration_ms, "
          "a.target_rpid as ann_target_rpid "
          "from units u left join annotations a on a.unit_id = u.id ")
@@ -553,6 +557,7 @@ def api_export():
     writer.writerow([
         "unit_id", "bvid", "target_rpid", "target_user", "target_text",
         "stratum_key", "stratum_n", "inclusion_prob", "video_title",
+        "context_degraded", "degraded_reason",
         "annotator", "d1_labels", "d1_primary", "d1_mixed",
         "d2_labels", "d2_primary", "d2_mixed",
         "d3_type", "d3_extent", "d3_evidence",
@@ -571,7 +576,8 @@ def api_export():
         writer.writerow([
             r["unit_id"], r["bvid"], r["target_rpid"], r["target_user"],
             r["target_text"], r["stratum_key"], r["stratum_n"], r["inclusion_prob"],
-            r["video_title"], r["annotator"],
+            r["video_title"], r["context_degraded"], r["degraded_reason"],
+            r["annotator"],
             "|".join(d1.get("labels") or []), d1.get("primary"), d1.get("is_mixed"),
             "|".join(d2.get("labels") or []), d2.get("primary"), d2.get("is_mixed"),
             d3.get("type"), d3.get("extent"), d3.get("evidence"),

@@ -53,9 +53,11 @@ ANNOTATOR_HOST=0.0.0.0 python app.py
 | `[CORE]` | **本层** = 楼层根评论 + **前面 3 个评论**（`C_CORE_PRIOR_N=3`；meso 上下文） |
 | `[TARGET]` | 待标评论 |
 
-**只纳入"祖先链完整"的评论**：若某评论的父级已被删除/未采集，它没有可靠上下文，
-材料阶段即**排除**（约 5.2% 的候选评论；排除数记录在 `meta.sampling.n_broken_chain_excluded`），
-绝不生成空/降级的卡。`scripts/verify_cards.py` 可对全部单元逐条回查 corpus 校验。
+**上下文完整性（`context_degraded`）**：若某评论的祖先链因**父评论被删除/未采集**而断裂，它**不会被丢弃**，而是：
+- 卡面显示醒目标记「⚠ 上下文不完整」，`context_degraded=1`、`degraded_reason` 记录是 `parent_missing` 还是 `ancestor_missing`；
+- **锚点回退为楼层根**（`anchor_degraded=1`），D3 判定基于楼层根并注明；
+- 实测这批约占候选评论的 **5.2%**，且**更长、更偏实质性辩论**（详见 `scripts/analyze_broken_chain.py`），丢弃会引入选择偏差，故保留标记。
+`scripts/verify_cards.py` 对全部单元逐条回查 corpus 校验（含 degraded 单元的可达链一致性）。
 **不呈现 `C_extra`（溢读带）**：避免标注员的 hindsight bias；该字段留给模型/分析使用。
 
 ### 2. 量表（详见 codebook）
@@ -99,6 +101,7 @@ codebook/CODEBOOK.md          标注手册（可在 UI 内查看）
 data/annotation.db            500 条标注单元（小，可分享）
 scripts/materialize_units.py  从大库抽样并生成单元（唯一接触大库的脚本）
 scripts/verify_cards.py       逐条回查 corpus 校验上下文卡（parent/root/video/anchor/path/core）
+scripts/analyze_broken_chain.py  诊断断链评论（内容画像 + 视频/主题分布）
 scripts/compute_iaa.py        Krippendorff α / Cohen κ
 tests/test_core.py            统计核心回归测试
 ```

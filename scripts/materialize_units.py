@@ -74,6 +74,8 @@ create table if not exists units(
   anchor_rpid text, anchor_text text, anchor_claim text,
   path_json text, core_json text, target_rpid text, target_user text,
   target_ts integer, target_text text, target_meta_json text,
+  context_degraded integer default 0, anchor_degraded integer default 0,
+  degraded_reason text,
   stratum_key text, stratum_n integer, inclusion_prob real, sampled_by text,
   created_at integer
 );
@@ -105,7 +107,8 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         "video_summary_suggested", "video_summary_final", "video_url",
         "anchor_rpid", "anchor_text", "anchor_claim", "path_json", "core_json",
         "target_rpid", "target_user", "target_ts", "target_text",
-        "target_meta_json", "stratum_key", "stratum_n", "inclusion_prob",
+        "target_meta_json", "context_degraded", "anchor_degraded", "degraded_reason",
+        "stratum_key", "stratum_n", "inclusion_prob",
         "sampled_by", "created_at",
     }
     actual = {r[1] for r in conn.execute("pragma table_info(units)")}
@@ -122,6 +125,8 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             "  anchor_rpid text, anchor_text text, anchor_claim text,"
             "  path_json text, core_json text, target_rpid text, target_user text,"
             "  target_ts integer, target_text text, target_meta_json text,"
+            "  context_degraded integer default 0, anchor_degraded integer default 0,"
+            "  degraded_reason text,"
             "  stratum_key text, stratum_n integer, inclusion_prob real,"
             "  sampled_by text, created_at integer);"
         )
@@ -320,20 +325,21 @@ def process_video(con, bvid, meta) -> tuple[list[tuple], int]:
 
     topic = video_is_labor(meta)
     out = []
-    excluded = 0
+    n_degraded = 0
     for rpid, parent, root, lvl, content, ts in rows:
         content = content or ""
         tlen = len(content)
         if tlen == 0:
             continue
+        degraded = 0
         if lvl != "root" and not chain_valid(rpid):
-            excluded += 1
-            continue
+            degraded = 1  # ancestor (parent or higher) missing -> degraded context
+            n_degraded += 1
         d = 0 if lvl == "root" else depth(rpid)
         skey = (topic, heat_bucket(floor_size[floor_of[rpid]]), depth_bucket(d),
                 polarity_bucket(content), flagtype(content, tlen), length_bucket(tlen))
-        out.append((rpid, json.dumps(skey, ensure_ascii=False), bvid))
-    return out, excluded
+        out.append((rpid, json.dumps(skey, ensure_ascii=False), bvid, degraded))
+    return out, n_degraded
 
 
 # ----------------------------- stratified sample ----------------------------- #
@@ -350,7 +356,7 @@ def stratified_sample(cands: list[tuple], target: int, seed: int) -> dict[str, d
     unbiased. Deterministic: every ordering is sorted, every shuffle seeded.
     """
     by_stratum: dict[str, list[str]] = defaultdict(list)
-    for rpid, skey, bvid in cands:
+    for rpid, skey, bvid, *rest in cands:
         by_stratum[skey].append(rpid)
     for k in by_stratum:
         by_stratum[k].sort()
@@ -375,8 +381,8 @@ def stratified_sample(cands: list[tuple], target: int, seed: int) -> dict[str, d
         selected = selected[:target]
     elif len(selected) < target:
         chosen_set = {r for _, r in selected}
-        skey_of = {r: sk for r, sk, _ in cands}
-        leftover = sorted(r for r, _, _ in cands if r not in chosen_set)
+        skey_of = {r: sk for r, sk, *rest in cands}
+        leftover = sorted(r for r, *rest in cands if r not in chosen_set)
         rng.shuffle(leftover)
         for r in leftover[: target - len(selected)]:
             selected.append((skey_of[r], r))
@@ -429,8 +435,20 @@ def build_card(con, target_rpid: str, meta_by_bvid: dict) -> dict:
         guard += 1
     path.reverse()
 
+    # context integrity: a complete chain must reach the floor root (path[0])
+    context_degraded = 0
+    degraded_reason = None
+    if not is_root:
+        if parent not in fmap:
+            context_degraded = 1
+            degraded_reason = "parent_missing"
+        elif not path or path[0]["rpid"] != floor_key:
+            context_degraded = 1
+            degraded_reason = "ancestor_missing"
+
     # branch root = deepest ancestor whose parent is the floor root
     anchor_rpid, anchor_text = "", ""
+    anchor_degraded = 0
     if is_root:
         anchor_rpid, anchor_text = rpid, content or ""
     elif parent == floor_key:
@@ -444,8 +462,13 @@ def build_card(con, target_rpid: str, meta_by_bvid: dict) -> dict:
                 break
             cur = f[1]
             guard += 1
-        if not anchor_rpid and path:
-            anchor_rpid, anchor_text = path[0]["rpid"], path[0]["text"]
+        if not anchor_rpid:
+            # chain is broken before reaching the branch root: degrade the anchor
+            # to the floor root so D3 (drift) is still well-defined.
+            rootrow = fmap.get(floor_key)
+            anchor_rpid = floor_key
+            anchor_text = (rootrow[3] or "") if rootrow else ""
+            anchor_degraded = 1
 
     # core: same-floor, ts <= parent.ts (floor root + nearest <=5)
     core = []
@@ -481,8 +504,12 @@ def build_card(con, target_rpid: str, meta_by_bvid: dict) -> dict:
         "target_ts": int(ts or 0),
         "target_text": content or "",
         "target_meta_json": json.dumps(
-            {"like": like, "is_root": is_root, "depth_hint": len(path)},
+            {"like": like, "is_root": is_root, "depth_hint": len(path),
+             "context_degraded": context_degraded, "degraded_reason": degraded_reason},
             ensure_ascii=False),
+        "context_degraded": context_degraded,
+        "anchor_degraded": anchor_degraded,
+        "degraded_reason": degraded_reason,
         "created_at": int(time.time()),
     }
 
@@ -526,17 +553,17 @@ def main():
 
     con = sqlite3.connect(args.corpus)
     all_cands: list[tuple] = []
-    n_broken = 0
+    n_degraded = 0
     for i, bvid in enumerate(bvids):
-        cands, excluded = process_video(con, bvid, meta_by_bvid.get(
+        cands, degraded = process_video(con, bvid, meta_by_bvid.get(
             bvid, {"title": "", "author": "", "desc": "", "tags": []}))
         all_cands.extend(cands)
-        n_broken += excluded
+        n_degraded += degraded
         if (i + 1) % 200 == 0:
             print(f"  processed {i+1}/{len(bvids)} videos, cands={len(all_cands):,}, "
-                  f"broken_chain_excluded={n_broken:,}")
+                  f"context_degraded={n_degraded:,}")
     print(f"total candidate comments: {len(all_cands):,} "
-          f"(excluded broken-chain: {n_broken:,})")
+          f"(context_degraded: {n_degraded:,})")
 
     picked = stratified_sample(all_cands, args.target, args.seed)
     print(f"sampled {len(picked)} units; building cards...")
@@ -571,7 +598,10 @@ def main():
         "sampling.target_n": str(args.target),
         "sampling.n_units": str(built),
         "sampling.n_candidates": str(len(all_cands)),
-        "sampling.n_broken_chain_excluded": str(n_broken),
+        "sampling.n_context_degraded_candidates": str(n_degraded),
+        "sampling.context_degraded_note": (
+            "comments whose ancestor chain is broken (deleted/uncaptured parent) "
+            "are KEPT and flagged context_degraded=1; D3 anchor degrades to floor root"),
         "sampling.stratification": STRATIFICATION_SPEC,
         "sampling.quota_rule": "quota ~ sqrt(stratum_size), min 1, then trim/topup",
         "source.a805": json.dumps(file_info(args.a805), ensure_ascii=False),
