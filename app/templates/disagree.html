@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="wrap">
+  <div class="statusbar">
+    <span class="status-text">分歧裁决 / Disagreement Adjudication</span>
+    <div class="status-right">
+      <label class="muted"><input type="checkbox" id="onlyopen" checked /> 只看未裁决</label>
+      <button id="refresh" class="btn ghost sm">刷新</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="formhead">
+      <h2>说明</h2>
+      <span class="muted">裁决不修改原始标注；只新增 <code>adjudications</code> 记录，用于生成决策卡</span>
+    </div>
+    <p class="muted">
+      仅当 <b>≥2 名标注员对同一维度的判断不同</b> 时才会出现在此。逐单元逐维度裁决：
+      选定最终值（或“其他”并写判据），必要时补充该类的正/负例素材，最后回填到 Codebook §7。
+    </p>
+    <div class="muted" id="summary">加载中…</div>
+  </div>
+
+  <div id="list"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function esc(s){ return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+const DIM_NAMES = {D1:'1. 修辞策略', D2:'2. 语用动机', D3:'3. 议题漂移', D4:'4. 情感/毒性'};
+
+// pretty-print a signature value (list | nested list | scalar)
+function fmtVal(v){
+  if(v===null || v===undefined) return '<span class="muted">—</span>';
+  if(Array.isArray(v)){
+    if(v.length && Array.isArray(v[0])) return v.map(x=>'('+x.map(y=>esc(y==null?'∅':y)).join(', ')+')').join(' ');
+    return v.length ? v.map(esc).join(', ') : '<span class="muted">—</span>';
+  }
+  return esc(v);
+}
+function sigKey(v){ return JSON.stringify(v); }
+
+function renderDim(uid, dim, rep){
+  const ratings = rep.ratings || [];
+  // distinct non-null signatures
+  const seen = new Map();
+  ratings.forEach(r=>{ const k=sigKey(r.value); if(!seen.has(k)) seen.set(k, r.value); });
+  const opts = [...seen.entries()];
+
+  const ratingChips = ratings.map(r=>
+    `<span class="chip">${esc(r.annotator)}：${fmtVal(r.value)}</span>`).join(' ');
+
+  const adj = rep.adjudicated;
+  const badge = adj ? `<span class="badge ok">已裁决</span>` : `<span class="badge warn">待裁决</span>`;
+
+  const radioName = `adj_${uid}_${dim}`;
+  const choices = opts.map(([k,val],i)=>
+    `<label class="adjopt"><input type="radio" name="${radioName}" value='${esc(k)}' ${i===0?'checked':''}/> ${fmtVal(val)}</label>`
+  ).join('');
+  const other = `<label class="adjopt"><input type="radio" name="${radioName}" value="__other__"/> 其他/合并（在下方写最终值）</label>`;
+  const customInput = `<input type="text" class="adjcustom" id="custom_${uid}_${dim}" placeholder="最终值，如 1.3|1.5 或 3.3(4)"/>`;
+
+  const adjInfo = adj ? `<div class="muted">已由 <b>${esc(rep.adjudicator)}</b> 裁决为：${fmtVal(rep.decision)}</div>` : '';
+
+  return `<div class="dimbox ${adj?'done':''}" data-uid="${uid}" data-dim="${dim}">
+    <div class="dimhead"><b>${DIM_NAMES[dim]}</b> ${badge}</div>
+    <div class="ratingline">${ratingChips}</div>
+    <div class="adjchoices">${choices}${other}</div>
+    ${customInput}
+    <div class="adjrow">
+      <input type="text" class="adjnote" id="note_${uid}_${dim}" placeholder="判据/备注（如：因人肉嘲讽判 2.4；引用原文…）"/>
+      <button class="btn primary sm" onclick="saveAdj(${uid},'${dim}')">保存裁决</button>
+      <span class="muted" id="state_${uid}_${dim}"></span>
+    </div>
+    ${adjInfo}
+  </div>`;
+}
+
+function renderUnit(u){
+  const dims = Object.entries(u.dims).map(([dim,rep])=>renderDim(u.unit_id, dim, rep)).join('');
+  const openBadge = u.open_dims.length ? `<span class="badge warn">${u.open_dims.length} 维待裁决</span>` : `<span class="badge ok">全部已裁决</span>`;
+  return `<div class="card unitcard">
+    <div class="formhead">
+      <h2>#${u.unit_id} ${openBadge}</h2>
+      <a class="btn ghost sm" href="/?unit=${u.unit_id}" target="_blank">打开完整上下文卡 ↗</a>
+    </div>
+    <div class="ctxmini">
+      <div class="muted">视频：${esc(u.video_title)}</div>
+      <div class="muted">锚点：${esc((u.anchor_text||'').slice(0,100))}</div>
+      <div class="targetmini"><b>${esc(u.target_user)}</b>：${esc(u.target_text)}</div>
+    </div>
+    ${dims}
+  </div>`;
+}
+
+function load(){
+  const open = document.getElementById('onlyopen').checked ? '?open=1' : '';
+  fetch('/api/disagreements'+open).then(r=>r.json()).then(d=>{
+    const list = d.disagreements || [];
+    document.getElementById('summary').textContent =
+      `共 ${list.length} 个存在未裁决/已裁决分歧的单元`;
+    document.getElementById('list').innerHTML = list.length
+      ? list.map(renderUnit).join('')
+      : '<div class="card muted">没有分歧 🎉（需要 ≥2 名标注员重叠标注同一批单元后才会出现）</div>';
+    document.querySelectorAll('.adjcustom').forEach(inp=>{
+      inp.style.display='none';
+      // reveal custom input when "其他" selected
+      const name = 'adj_'+inp.id.split('_').slice(1).join('_');
+      document.getElementsByName(name).forEach(r=>{
+        r.addEventListener('change',()=>{
+          inp.style.display = (r.value==='__other__' && r.checked) ? 'block':'none';
+        });
+      });
+    });
+  }).catch(()=>{ document.getElementById('summary').textContent='加载失败'; });
+}
+
+function saveAdj(uid, dim){
+  const a = getAnnotator();
+  if(!a){ alert('请先在右上角输入裁决人名字'); return; }
+  const name = `adj_${uid}_${dim}`;
+  const picked = [...document.getElementsByName(name)].find(r=>r.checked);
+  if(!picked){ alert('请选择一个裁决结果'); return; }
+  let decision;
+  if(picked.value === '__other__'){
+    const custom = document.getElementById('custom_'+uid+'_'+dim).value.trim();
+    if(!custom){ alert('请填写最终值'); return; }
+    decision = {custom};
+  } else {
+    decision = JSON.parse(picked.value);
+  }
+  const note = document.getElementById('note_'+uid+'_'+dim).value.trim();
+  document.getElementById('state_'+uid+'_'+dim).textContent = '保存中…';
+  fetch('/api/adjudicate',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({unit_id:uid, dimension:dim, adjudicator:a, decision, note})})
+  .then(r=>r.json().then(x=>({ok:r.ok,x})))
+  .then(({ok,x})=>{
+    if(ok&&x.ok){ document.getElementById('state_'+uid+'_'+dim).textContent='已保存 ✓'; setTimeout(load,400); }
+    else { document.getElementById('state_'+uid+'_'+dim).textContent='失败：'+(x.error||''); }
+  }).catch(()=>{ document.getElementById('state_'+uid+'_'+dim).textContent='网络错误'; });
+}
+
+document.getElementById('refresh').onclick = load;
+document.getElementById('onlyopen').onchange = load;
+load();
+</script>
+{% endblock %}

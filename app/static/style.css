@@ -174,3 +174,22 @@ textarea:focus, input[type=text]:focus, select:focus { border-color: var(--accen
 .unitcell .preview { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
 .unitcell .open { flex: none; color: var(--accent); text-decoration: none; font-weight: 600; }
 .unitcell .open:hover { text-decoration: underline; }
+
+/* disagreement page */
+.badge { font-size: 12px; padding: 2px 8px; border-radius: 99px; font-weight: 600; }
+.badge.ok { background: #ecfdf5; color: #047857; }
+.badge.warn { background: #fffbeb; color: #b45309; }
+.unitcard .ctxmini { background: #fafaff; border: 1px solid #e6e6fb; border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.targetmini { font-size: 15px; }
+.dimbox { border: 1px solid var(--line); border-left: 4px solid var(--warn); border-radius: 10px; padding: 12px 14px; margin: 10px 0; }
+.dimbox.done { border-left-color: var(--good); background: #fcfefd; }
+.dimhead { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.ratingline { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.chip { background: #eef0ff; color: #3730a3; border-radius: 6px; padding: 2px 8px; font-size: 13px; }
+.adjchoices { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }
+.adjopt { display: flex; align-items: center; gap: 7px; border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; cursor: pointer; font-size: 14px; }
+.adjopt:hover { background: #f9fafb; }
+.adjopt input { accent-color: var(--accent); }
+.adjcustom { width: 100%; margin: 4px 0 8px; }
+.adjrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.adjnote { flex: 1 1 260px; }

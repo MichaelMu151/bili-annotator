@@ -58,7 +58,28 @@ def db() -> sqlite3.Connection:
     conn.execute("pragma journal_mode=wal")
     conn.execute("pragma busy_timeout=30000")
     conn.execute("pragma foreign_keys=on")
+    _ensure_app_tables(conn)
     return conn
+
+
+def _ensure_app_tables(conn: sqlite3.Connection) -> None:
+    """Create app-owned tables that are not produced by materialize_units.py.
+
+    ``adjudications`` stores the adjudicator's resolved value per (unit,
+    dimension) once a disagreement has been reviewed — the raw per-annotator
+    judgments stay untouched in ``annotations`` for full provenance.
+    """
+    conn.execute(
+        "create table if not exists adjudications("
+        "  id integer primary key autoincrement,"
+        "  unit_id integer not null,"
+        "  dimension text not null,"
+        "  adjudicator text not null,"
+        "  decision_json text,"
+        "  note text,"
+        "  created_at integer, updated_at integer,"
+        "  unique(unit_id, dimension))")
+    conn.execute("create index if not exists idx_adj_unit on adjudications(unit_id)")
 
 
 def row_to_unit(r: sqlite3.Row) -> dict:
@@ -111,6 +132,11 @@ def codebook():
 @app.get("/progress")
 def progress():
     return render_template("progress.html")
+
+
+@app.get("/disagree")
+def disagree():
+    return render_template("disagree.html")
 
 
 # --------------------------------------------------------------------------- #
@@ -318,6 +344,145 @@ def api_card(uid):
     params.append(uid)
     conn = db()
     conn.execute(f"update units set {', '.join(sets)} where id=?", params)
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+# --------------------------------------------------------------------------- #
+# API — disagreement detection & adjudication
+# --------------------------------------------------------------------------- #
+def _dim_signature(payload: dict, dim: str) -> object:
+    """Normalise one dimension into a comparable signature (None = not rated).
+
+    D1/D2 compare the *label set* (order-independent); D3 compares type and,
+    separately, extent; D4 splits into polarity/arousal/toxicity. Returns a
+    hashable signature so agreement is `len(set(sigs)) == 1`.
+    """
+    v = (payload or {}).get(dim)
+    if not isinstance(v, dict):
+        return None
+    if dim in ("D1", "D2"):
+        labels = v.get("labels") or []
+        if not labels and not v.get("primary"):
+            return None
+        return frozenset(labels) if labels else frozenset([v["primary"]])
+    if dim == "D3":
+        t = v.get("type")
+        if not t:
+            return None
+        return (t, str(v.get("extent")) if v.get("extent") not in (None, "") else None)
+    if dim == "D4":
+        pol = v.get("polarity")
+        if pol in (None, "") and v.get("toxicity") in (None, "") and v.get("arousal") in (None, ""):
+            return None
+        return (str(pol) if pol not in (None, "") else None,
+                v.get("arousal") or None,
+                str(v.get("toxicity")) if v.get("toxicity") not in (None, "") else None)
+    return None
+
+
+def _sig_to_json(sig):
+    """Convert a signature (may contain frozenset) into JSON-serialisable form."""
+    if isinstance(sig, frozenset):
+        return sorted(sig)
+    if isinstance(sig, tuple):
+        return list(sig)
+    return sig
+
+
+@app.get("/api/disagreements")
+def api_disagreements():
+    """List units where ≥2 annotators disagree on one or more dimensions.
+
+    A disagreement is any dimension whose signature differs across the
+    annotators who rated it (≥2 ratings present, ≥2 distinct signatures).
+    Already-adjudicated dimensions are flagged so the UI can collapse them.
+    """
+    only_open = request.args.get("open") == "1"
+    conn = db()
+    units = {r["id"]: dict(r) for r in conn.execute("select * from units")}
+    anns_by_unit: dict[int, list] = {}
+    for a in conn.execute("select unit_id,annotator,payload_json from annotations order by unit_id"):
+        try:
+            payload = json.loads(a["payload_json"])
+        except (ValueError, TypeError):
+            continue
+        anns_by_unit.setdefault(a["unit_id"], []).append(
+            {"annotator": a["annotator"], "payload": payload})
+    adj = {}
+    try:
+        for r in conn.execute("select unit_id,dimension,decision_json,adjudicator,note from adjudications"):
+            adj[(r["unit_id"], r["dimension"])] = {
+                "decision": json.loads(r["decision_json"]) if r["decision_json"] else None,
+                "adjudicator": r["adjudicator"], "note": r["note"]}
+    except sqlite3.OperationalError:
+        pass
+    conn.close()
+
+    out = []
+    for uid, annlist in anns_by_unit.items():
+        if len(annlist) < 2:
+            continue
+        dim_reports = {}
+        for dim in DIMS:
+            rated = [(a["annotator"], _dim_signature(a["payload"], dim)) for a in annlist]
+            rated = [(n, s) for n, s in rated if s is not None]
+            if len(rated) < 2:
+                continue
+            sigs = {s for _, s in rated}
+            if len(sigs) > 1:
+                is_adj = (uid, dim) in adj
+                dim_reports[dim] = {
+                    "ratings": [{"annotator": n, "value": _sig_to_json(s)} for n, s in rated],
+                    "adjudicated": is_adj,
+                    "decision": adj.get((uid, dim), {}).get("decision"),
+                    "adjudicator": adj.get((uid, dim), {}).get("adjudicator"),
+                }
+        if not dim_reports:
+            continue
+        if only_open and all(d["adjudicated"] for d in dim_reports.values()):
+            continue
+        u = units.get(uid, {})
+        out.append({
+            "unit_id": uid,
+            "target_text": u.get("target_text", ""),
+            "target_user": u.get("target_user", ""),
+            "video_title": u.get("video_title", ""),
+            "anchor_text": u.get("anchor_text", ""),
+            "n_annotators": len(annlist),
+            "dims": dim_reports,
+            "open_dims": [d for d, r in dim_reports.items() if not r["adjudicated"]],
+        })
+    out.sort(key=lambda x: (-len(x["open_dims"]), x["unit_id"]))
+    return jsonify({"disagreements": out,
+                    "dims_meta": {"D1": sorted(D1_LABELS), "D2": sorted(D2_LABELS),
+                                  "D3": sorted(D3_TYPES), "D4": None}})
+
+
+@app.post("/api/adjudicate")
+def api_adjudicate():
+    """Persist an adjudicator's resolved decision for one (unit, dimension)."""
+    data = request.get_json(force=True, silent=True) or {}
+    unit_id = data.get("unit_id")
+    dim = data.get("dimension")
+    adjudicator = (data.get("adjudicator") or "").strip()
+    decision = data.get("decision")
+    note = (data.get("note") or "")[:1000]
+    if not unit_id or dim not in DIMS or not adjudicator or decision is None:
+        return jsonify({"error": "unit_id/dimension/adjudicator/decision required"}), 400
+    now = int(time.time())
+    conn = db()
+    if conn.execute("select 1 from units where id=?", (unit_id,)).fetchone() is None:
+        conn.close()
+        return jsonify({"error": f"unit {unit_id} not found"}), 404
+    conn.execute(
+        "insert into adjudications(unit_id,dimension,adjudicator,decision_json,note,"
+        "created_at,updated_at) values(?,?,?,?,?,?,?) "
+        "on conflict(unit_id,dimension) do update set "
+        "adjudicator=excluded.adjudicator, decision_json=excluded.decision_json, "
+        "note=excluded.note, updated_at=excluded.updated_at",
+        (unit_id, dim, adjudicator, json.dumps(decision, ensure_ascii=False), note, now, now))
     conn.commit()
     conn.close()
     return jsonify({"ok": True})

@@ -30,8 +30,13 @@ ANNOTATOR_HOST=0.0.0.0 python app.py
 | 路径 | 用途 |
 |---|---|
 | `/` | 标注界面：上下文卡 + 四维度表单（草稿自动暂存、`⌘/Ctrl+Enter` 保存） |
+| `/disagree` | 分歧裁决：集中展示多人判断不一致的单元，逐维度裁决（写入 `adjudications`），用于产出决策卡 |
 | `/codebook` | 标注手册（直接渲染 `codebook/CODEBOOK.md`，随时切换查看标准） |
 | `/progress` | 进度 / 质检 / 导出：总体覆盖、维度填写率、标注员对比、抽样溯源、单元列表 |
+
+> **原始大库**（`analysis_805.db` 1.1GB / `corpus.db` 1.7GB）放在
+> [Release: data-805-v1](https://github.com/MichaelMu151/bili-annotator/releases/tag/data-805-v1)。
+> 标注本身只依赖仓库内 `data/annotation.db`(1.2MB)，无需下载大库；只有重建抽样时才需要。
 
 ---
 
@@ -107,6 +112,8 @@ tests/test_core.py            统计核心回归测试
 | POST | `/api/annotate` | 保存标注（校验 `primary ∈ labels`） |
 | POST | `/api/unit/<id>/card` | 保存视频摘要 / anchor claim |
 | GET | `/api/stats` | 覆盖、标注员、维度填写率 |
+| GET | `/api/disagreements[?open=1]` | 多人判断不一致的单元（含各人取值与裁决状态） |
+| POST | `/api/adjudicate` | 保存某单元某维度的裁决（写入 `adjudications`） |
 | GET | `/api/export[?annotator=]` | 分析用 CSV（含 `inclusion_prob`、`integrity_ok`） |
 
 ---
