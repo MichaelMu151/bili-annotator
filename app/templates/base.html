@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BiliAnnotator</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">📝 BiliAnnotator</div>
+    <nav id="nav">
+      <a href="/" data-path="/">标注</a>
+      <a href="/codebook" data-path="/codebook">标注手册</a>
+      <a href="/progress" data-path="/progress">进度 / 质检</a>
+    </nav>
+    <div class="who">
+      <span>标注员</span>
+      <input id="annotator" placeholder="输入你的名字" autocomplete="off" />
+      <span class="progresschip" id="progresschip" title="你的整体进度"></span>
+    </div>
+  </header>
+  <main>{% block content %}{% endblock %}</main>
+  <script>
+    const _a = document.getElementById('annotator');
+    _a.value = localStorage.getItem('annotator') || '';
+    _a.addEventListener('input', () => {
+      localStorage.setItem('annotator', _a.value.trim());
+      refreshChip();
+    });
+    function getAnnotator() { return (document.getElementById('annotator').value || '').trim(); }
+
+    // active nav
+    const path = location.pathname;
+    document.querySelectorAll('#nav a').forEach(a => {
+      if (a.dataset.path === path) a.classList.add('active');
+    });
+
+    // progress chip in header
+    function refreshChip() {
+      const a = getAnnotator();
+      if (!a) { document.getElementById('progresschip').textContent = ''; return; }
+      fetch('/api/stats').then(r => r.json()).then(s => {
+        const mine = (s.annotators.find(x => x.annotator === a) || {}).count || 0;
+        document.getElementById('progresschip').textContent = `${mine}/${s.total_units}`;
+      }).catch(() => {});
+    }
+    refreshChip();
+    window.addEventListener('focus', refreshChip);
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

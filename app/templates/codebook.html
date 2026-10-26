@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="wrap narrow">
+  <div class="statusbar">
+    <span class="status-text">标注手册 / Codebook</span>
+    <a class="btn ghost sm" href="/">← 回到标注</a>
+  </div>
+  <article class="card prose">
+    {{ codebook_html | safe }}
+  </article>
+</div>
+{% endblock %}

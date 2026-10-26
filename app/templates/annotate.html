@@ -1,0 +1,359 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="wrap">
+  <div class="statusbar">
+    <div class="status-left">
+      <span id="status" class="status-text">加载中…</span>
+      <span class="unitid" id="unitid"></span>
+    </div>
+    <div class="status-right">
+      <div class="pbar" title="你的进度"><div class="pbar-fill" id="pbarfill"></div></div>
+      <span id="pbartext" class="muted"></span>
+      <button id="prev" class="btn ghost sm">‹ 上一条</button>
+      <button id="skip" class="btn ghost sm">跳过 ›</button>
+    </div>
+  </div>
+
+  <div id="donebanner" class="donebanner" style="display:none">
+    🎉 你已标注完全部单元。可前往「进度 / 质检」查看统计或导出。
+  </div>
+
+  <div id="card" class="card"></div>
+
+  <form id="form" class="card formcard">
+    <div class="formhead">
+      <h2>维度标注</h2>
+      <span class="muted">快捷键：Ctrl/⌘ + Enter 保存并下一条</span>
+    </div>
+
+    <!-- D1 -->
+    <section class="dim d1">
+      <h3>1. 修辞策略与讽刺细分 <span class="hint">多标签 · 主标签 · is_mixed</span></h3>
+      <div class="row">
+        <div class="checks">
+          <label><input type="checkbox" name="d1" value="1.1" /> 1.1 反讽/倒置</label>
+          <label><input type="checkbox" name="d1" value="1.2" /> 1.2 嘲讽/挖苦</label>
+          <label><input type="checkbox" name="d1" value="1.3" /> 1.3 犬儒虚无/反向解构</label>
+          <label><input type="checkbox" name="d1" value="1.4" /> 1.4 自嘲/苦情</label>
+          <label><input type="checkbox" name="d1" value="1.5" /> 1.5 直白陈述</label>
+        </div>
+        <div class="meta">
+          <label>主标签
+            <select name="d1primary">
+              <option value="">—</option>
+              <option>1.1</option><option>1.2</option><option>1.3</option>
+              <option>1.4</option><option>1.5</option>
+            </select>
+          </label>
+          <label class="inline"><input type="checkbox" name="d1mixed" /> is_mixed</label>
+        </div>
+      </div>
+    </section>
+
+    <!-- D2 -->
+    <section class="dim d2">
+      <h3>2. 语用动机与言语行为 <span class="hint">多标签 · 主标签 · is_mixed</span></h3>
+      <div class="row">
+        <div class="checks">
+          <label><input type="checkbox" name="d2" value="2.1" /> 2.1 建设性论辩</label>
+          <label><input type="checkbox" name="d2" value="2.2" /> 2.2 情绪共鸣/连带</label>
+          <label><input type="checkbox" name="d2" value="2.3" /> 2.3 动机怀疑/诛心</label>
+          <label><input type="checkbox" name="d2" value="2.4" /> 2.4 纯泄愤/对抗</label>
+          <label><input type="checkbox" name="d2" value="2.5" /> 2.5 虚无解构/劝退</label>
+        </div>
+        <div class="meta">
+          <label>主标签
+            <select name="d2primary">
+              <option value="">—</option>
+              <option>2.1</option><option>2.2</option><option>2.3</option>
+              <option>2.4</option><option>2.5</option>
+            </select>
+          </label>
+          <label class="inline"><input type="checkbox" name="d2mixed" /> is_mixed</label>
+        </div>
+      </div>
+    </section>
+
+    <!-- D3 -->
+    <section class="dim d3">
+      <h3>3. 议题漂移与偏离机制 <span class="hint">单选 type · extent(1–4) · 证据</span></h3>
+      <div class="row">
+        <div class="checks">
+          <label><input type="radio" name="d3type" value="3.1" /> 3.1 议题聚焦</label>
+          <label><input type="radio" name="d3type" value="3.2" /> 3.2 合理议题延展</label>
+          <label><input type="radio" name="d3type" value="3.3" /> 3.3 离题转移/围魏救赵</label>
+          <label><input type="radio" name="d3type" value="3.4" /> 3.4 元争论/辨经</label>
+        </div>
+        <div class="meta">
+          <label>extent
+            <select name="d3extent">
+              <option value="">—</option><option>1</option><option>2</option>
+              <option>3</option><option>4</option>
+            </select>
+          </label>
+          <label>证据<input type="text" name="d3evidence" placeholder="原文片段 / 锚点依据" /></label>
+        </div>
+      </div>
+    </section>
+
+    <!-- D4 -->
+    <section class="dim d4">
+      <h3>4. 基础情感与攻击强度 <span class="hint">极性 · 唤醒度 · 毒性(0–3) · 证据</span></h3>
+      <div class="row">
+        <div class="checks">
+          <label>极性
+            <select name="d4polarity">
+              <option value="">—</option>
+              <option value="-1">-1 负向</option>
+              <option value="0">0 中性</option>
+              <option value="1">+1 正向</option>
+            </select>
+          </label>
+          <label>唤醒度
+            <select name="d4arousal">
+              <option value="">—</option>
+              <option value="low">low 低唤醒</option>
+              <option value="high">high 高唤醒</option>
+            </select>
+          </label>
+          <label>毒性
+            <select name="d4toxicity">
+              <option value="">—</option><option>0</option><option>1</option>
+              <option>2</option><option>3</option>
+            </select>
+          </label>
+        </div>
+        <div class="meta">
+          <label>证据<input type="text" name="d4evidence" placeholder="原文片段" /></label>
+        </div>
+      </div>
+    </section>
+
+    <section class="dim global">
+      <h3>全局判定</h3>
+      <div class="row">
+        <div class="checks">
+          <label class="inline"><input type="checkbox" name="ambiguous" /> ambiguous（无法判定/证据不足）</label>
+          <label>置信度
+            <select name="confidence">
+              <option>high</option><option selected>medium</option><option>low</option>
+            </select>
+          </label>
+        </div>
+        <div class="meta">
+          <label>备注<input type="text" name="notes" placeholder="疑问 / 边界案例 / 建议补充分层" /></label>
+        </div>
+      </div>
+    </section>
+
+    <div class="actions">
+      <button type="submit" class="btn primary">保存并下一条</button>
+      <span id="savestate" class="muted"></span>
+    </div>
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentUnit = null;
+let startTime = 0;
+let lastPos = 0;
+
+function esc(s){ return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function draftKey(){ return `draft:${getAnnotator()}:${currentUnit ? currentUnit.id : 'x'}`; }
+
+function setProgress(pos, total){
+  if(!total) return;
+  const pct = Math.min(100, Math.round(pos/total*100));
+  document.getElementById('pbarfill').style.width = pct + '%';
+  document.getElementById('pbartext').textContent = `${pos}/${total}`;
+}
+
+function loadNext(afterId){
+  const a = getAnnotator();
+  if(!a){ document.getElementById('status').textContent='请先在右上角输入标注员名字'; return; }
+  let url = '/api/next?annotator=' + encodeURIComponent(a);
+  if(afterId) url += '&after_id=' + afterId;
+  fetch(url).then(r=>r.json()).then(u=>{
+    document.getElementById('donebanner').style.display = u.done ? 'block':'none';
+    if(u.done){ document.getElementById('card').innerHTML=''; setProgress(lastPos,lastPos); return; }
+    currentUnit = u; startTime = Date.now(); renderUnit(u);
+    refreshMyTotal();
+  });
+}
+
+function refreshMyTotal(){
+  fetch('/api/stats').then(r=>r.json()).then(s=>{
+    const mine = (s.annotators.find(x=>x.annotator===getAnnotator())||{}).count||0;
+    lastPos = mine;
+    setProgress(mine + 1, s.total_units);
+  });
+}
+
+function renderUnit(u){
+  document.getElementById('unitid').textContent = '#' + u.id + (u.position ? ` (第 ${u.position} 条)` : '');
+  document.getElementById('status').textContent = '待标注';
+  const tags = (u.tags||[]).join(', ') || '—';
+  const path = (u.path||[]).map(x=>`<li><b>${esc(x.user)}</b>：${esc(x.text)}</li>`).join('') || '<li class="muted">（无，根评论）</li>';
+  const core = (u.core||[]).map(x=>`<li><b>${esc(x.user)}</b>：${esc(x.text)}</li>`).join('') || '<li class="muted">（无）</li>';
+  const prov = `<details class="prov"><summary>抽样溯源（学术透明）</summary>
+    <div>stratum: <code>${esc(JSON.stringify(u.stratum))}</code></div>
+    <div>stratum_n: ${esc(u.stratum_n)} · inclusion_prob: <b>${esc(u.inclusion_prob)}</b> · sampled_by: ${esc(u.sampled_by)}</div>
+    <div>anchor_rpid: ${esc(u.anchor_rpid)} · target_rpid: ${esc(u.target_rpid)} · bvid: ${esc(u.bvid)}</div>
+  </details>`;
+  document.getElementById('card').innerHTML = `
+    <h2>上下文卡</h2>
+    <div class="block">
+      <div class="blktitle">[VIDEO] 视频</div>
+      <div class="blkbody">
+        <div class="vtitle">${esc(u.video_title)}</div>
+        <div class="muted">up：${esc(u.video_author)} · tags：${esc(tags)}</div>
+        <div><a href="${esc(u.video_url)}" target="_blank" rel="noopener">打开视频 ↗（建议亲自核对）</a></div>
+        <label class="blocklabel">视频摘要（自动生成，可修改后保存）
+          <textarea id="vsummary" rows="2">${esc(u.video_summary_final || u.video_summary_suggested || '')}</textarea>
+        </label>
+        <button id="savsum" class="btn ghost sm">保存摘要</button>
+      </div>
+    </div>
+    <div class="block">
+      <div class="blktitle">[ANCHOR] 锚点 · 分支 root 的命题（人工填写，≤30字）</div>
+      <div class="blkbody">
+        <div class="muted anchor-text">branch root 原文：${esc((u.anchor_text||'').slice(0,120))}</div>
+        <input id="anchorclaim" class="wide" maxlength="60" value="${esc(u.anchor_claim||'')}" placeholder="用一句话概括该分支的核心命题（≤30字）" />
+        <button id="savanchor" class="btn ghost sm">保存锚点</button>
+      </div>
+    </div>
+    <div class="block"><div class="blktitle">[PATH] 祖先链（root → … → parent）</div><ul class="ctxlist">${path}</ul></div>
+    <div class="block"><div class="blktitle">[CORE] C_core（≤parent 时刻，必读下界）</div><ul class="ctxlist">${core}</ul></div>
+    <div class="block target">
+      <div class="blktitle">[TARGET] 待标评论</div>
+      <div class="blkbody">
+        <div class="tuser">${esc(u.target_user)}</div>
+        <div class="targettext">${esc(u.target_text)}</div>
+      </div>
+    </div>
+    ${prov}
+  `;
+  document.getElementById('savsum').onclick = ()=>saveCard('video_summary_final', document.getElementById('vsummary').value);
+  document.getElementById('savanchor').onclick = ()=>saveCard('anchor_claim', document.getElementById('anchorclaim').value);
+
+  resetForm();
+  if(u.existing) prefill(u.existing);
+  else restoreDraft();
+}
+
+function saveCard(field, val){
+  if(!currentUnit) return;
+  fetch('/api/unit/'+currentUnit.id+'/card',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({[field]:val})}).then(r=>r.json()).then(d=>{
+      document.getElementById('savestate').textContent = d.ok ? '已保存 '+field : '保存失败';
+    });
+}
+
+function resetForm(){
+  document.querySelectorAll('#form input[type=checkbox]').forEach(e=>e.checked=false);
+  document.querySelectorAll('#form input[type=radio]').forEach(e=>e.checked=false);
+  document.querySelectorAll('#form select').forEach(e=>e.selectedIndex=0);
+  document.querySelectorAll('#form input[type=text]').forEach(e=>e.value='');
+  document.querySelector('[name=confidence]').value='medium';
+}
+
+function prefill(p){
+  (p.D1?.labels||[]).forEach(v=>{ const c=document.querySelector('input[name=d1][value="'+v+'"]'); if(c) c.checked=true; });
+  if(p.D1?.primary) document.querySelector('[name=d1primary]').value=p.D1.primary;
+  if(p.D1?.is_mixed) document.querySelector('[name=d1mixed]').checked=true;
+  (p.D2?.labels||[]).forEach(v=>{ const c=document.querySelector('input[name=d2][value="'+v+'"]'); if(c) c.checked=true; });
+  if(p.D2?.primary) document.querySelector('[name=d2primary]').value=p.D2.primary;
+  if(p.D2?.is_mixed) document.querySelector('[name=d2mixed]').checked=true;
+  if(p.D3?.type){ const r=document.querySelector('input[name=d3type][value="'+p.D3.type+'"]'); if(r) r.checked=true; }
+  if(p.D3?.extent) document.querySelector('[name=d3extent]').value=p.D3.extent;
+  if(p.D3?.evidence) document.querySelector('[name=d3evidence]').value=p.D3.evidence;
+  if(p.D4?.polarity!=null) document.querySelector('[name=d4polarity]').value=String(p.D4.polarity);
+  if(p.D4?.arousal) document.querySelector('[name=d4arousal]').value=p.D4.arousal;
+  if(p.D4?.toxicity!=null) document.querySelector('[name=d4toxicity]').value=p.D4.toxicity;
+  if(p.D4?.evidence) document.querySelector('[name=d4evidence]').value=p.D4.evidence;
+  if(p.ambiguous) document.querySelector('[name=ambiguous]').checked=true;
+  if(p.confidence) document.querySelector('[name=confidence]').value=p.confidence;
+  if(p.notes) document.querySelector('[name=notes]').value=p.notes;
+}
+
+function collectPayload(){
+  const d1=[...document.querySelectorAll('input[name=d1]:checked')].map(e=>e.value);
+  const d2=[...document.querySelectorAll('input[name=d2]:checked')].map(e=>e.value);
+  const d3type=document.querySelector('input[name=d3type]:checked')?.value||null;
+  return {
+    D1:{labels:d1, primary:document.querySelector('[name=d1primary]').value||null, is_mixed:document.querySelector('[name=d1mixed]').checked},
+    D2:{labels:d2, primary:document.querySelector('[name=d2primary]').value||null, is_mixed:document.querySelector('[name=d2mixed]').checked},
+    D3:{type:d3type, extent:document.querySelector('[name=d3extent]').value||null, evidence:document.querySelector('[name=d3evidence]').value||''},
+    D4:{polarity:document.querySelector('[name=d4polarity]').value, arousal:document.querySelector('[name=d4arousal]').value||null, toxicity:document.querySelector('[name=d4toxicity]').value||null, evidence:document.querySelector('[name=d4evidence]').value||''},
+    ambiguous: document.querySelector('[name=ambiguous]').checked,
+    confidence: document.querySelector('[name=confidence]').value,
+    notes: document.querySelector('[name=notes]').value
+  };
+}
+
+// client-side validation: primary must be in labels
+function validate(payload){
+  for(const dim of ['D1','D2']){
+    const v = payload[dim];
+    if(v.primary && !v.labels.includes(v.primary)) return `${dim} 主标签 ${v.primary} 不在已选标签中`;
+  }
+  const any = payload.D1.labels.length || payload.D2.labels.length || payload.D3.type ||
+              (payload.D4.polarity!=='') || payload.ambiguous;
+  if(!any) return '至少标注一个维度，或勾选 ambiguous';
+  return null;
+}
+
+function saveDraft(){ try{ localStorage.setItem(draftKey(), JSON.stringify(collectPayload())); }catch(e){} }
+function restoreDraft(){ try{ const d=localStorage.getItem(draftKey()); if(d) prefill(JSON.parse(d)); }catch(e){} }
+
+document.getElementById('form').addEventListener('submit', e=>{
+  e.preventDefault();
+  if(!currentUnit){ return; }
+  const a=getAnnotator(); if(!a){ alert('请先输入标注员名字'); return; }
+  const payload=collectPayload();
+  const err=validate(payload); if(err){ alert(err); return; }
+  const duration = Date.now()-startTime;
+  fetch('/api/annotate',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({unit_id:currentUnit.id, annotator:a, payload, duration_ms:duration})})
+  .then(r=>r.json()).then(d=>{
+    if(d.ok){ localStorage.removeItem(draftKey()); loadNext(currentUnit.id); }
+    else{ alert('保存失败：'+(d.error||'')); }
+  });
+});
+
+document.getElementById('skip').onclick = ()=>{ if(currentUnit) loadNext(currentUnit.id); };
+document.getElementById('prev').onclick = ()=>{
+  if(!currentUnit || currentUnit.id<=1) return;
+  const a=getAnnotator();
+  fetch('/api/unit/'+(currentUnit.id-1)+'?annotator='+encodeURIComponent(a))
+    .then(r=>{ if(!r.ok) throw 0; return r.json(); })
+    .then(u=>{ currentUnit=u; startTime=Date.now(); renderUnit(u); })
+    .catch(()=>{});
+};
+
+// autosave draft on change
+document.getElementById('form').addEventListener('change', saveDraft);
+document.getElementById('form').addEventListener('input', saveDraft);
+
+// keyboard: Ctrl/Cmd+Enter submit
+document.addEventListener('keydown', e=>{
+  if((e.metaKey||e.ctrlKey) && e.key==='Enter'){ document.getElementById('form').requestSubmit(); }
+});
+
+(function boot(){
+  const q = new URLSearchParams(location.search);
+  const uid = q.get('unit');
+  if(uid){
+    const a = getAnnotator();
+    fetch('/api/unit/'+uid+'?annotator='+encodeURIComponent(a))
+      .then(r=>{ if(!r.ok) throw 0; return r.json(); })
+      .then(u=>{ currentUnit=u; startTime=Date.now(); renderUnit(u); refreshMyTotal(); })
+      .catch(()=>loadNext());
+  } else {
+    loadNext();
+  }
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,115 @@
+# BiliAnnotator
+
+面向 **B 站评论区话语分析** 的在线标注平台：把"**一条评论 + 它的上下文树**"作为标注单元，
+支持四维度（修辞 / 语用 / 议题漂移 / 情感毒性）标注、进度追踪、标注者一致性与可回推总体的抽样溯源。
+
+> 配套大库（`corpus.db` 1.6GB / `analysis_805.db` 1.0GB）**不进仓**；本仓只含已被抽样出来、
+> 体积很小的 `data/annotation.db`（默认 500 条单元）。这样任何人克隆后即可直接标注。
+
+---
+
+## 快速开始
+
+```bash
+python -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt
+python app.py            # http://127.0.0.1:5005
+```
+
+三个界面：
+
+| 路径 | 用途 |
+|---|---|
+| `/` | 标注界面：上下文卡 + 四维度表单（草稿自动暂存、`⌘/Ctrl+Enter` 保存） |
+| `/codebook` | 标注手册（直接渲染 `codebook/CODEBOOK.md`，随时切换查看标准） |
+| `/progress` | 进度 / 质检 / 导出：总体覆盖、维度填写率、标注员对比、抽样溯源、单元列表 |
+
+---
+
+## 设计要点（为什么这样做）
+
+### 1. 标注单元 = 评论 + 上下文卡
+每张卡固定五个区块，对应三层上下文假设：
+
+| 区块 | 内容 |
+|---|---|
+| `[VIDEO]` | 标题 / UP / 标签 / **可编辑摘要** + BV 链接（建议亲自核对视频） |
+| `[ANCHOR]` | 分支 root 原文 + **人工 anchor claim（≤30字）**；维度 3 的漂移基准 |
+| `[PATH]` | 祖先链 `root → … → parent` **逐字**（micro 上下文） |
+| `[CORE]` | `C_core`：同楼层 `t ≤ parent` 的评论（最近 ≤5 + 楼层根；meso 上下文） |
+| `[TARGET]` | 待标评论 |
+
+**不呈现 `C_extra`（溢读带）**：避免标注员的 hindsight bias；该字段留给模型/分析使用。
+
+### 2. 量表（详见 codebook）
+- **D1 / D2**：多标签 `0/1` + `primary` + `is_mixed`（两轴正交，可同时命中）
+- **D3**：`type` 单选（4 类）+ `extent` 序数 1–4（type 与 extent 分开测量）
+- **D4**：极性 `-1/0/+1`、唤醒度 `low/high`、毒性 `0–3`（三者解耦）
+- 全局：`ambiguous`（合法结果）、`confidence`、`notes`
+
+### 3. 抽样可复现 & 可回推总体（学术必需）
+- 分层键：`topic × floor_heat × depth × polarity × flagtype × length`
+- 配额 `∝ sqrt(stratum_size)`，覆盖长尾而不被大层淹没
+- **seed 持久化**在 `meta.sampling.seed`；候选按 `rpid`、楼层按 `(pub_ts, rpid)` 排序，**重建结果逐条一致**
+- 每条单元存 `stratum_key / stratum_n / inclusion_prob / sampled_by` → 下游可用**入样概率加权**回推总体
+
+### 4. 数据完整性与可溯源
+- `annotations.target_rpid`：标注时快照目标评论；导出含 `integrity_ok`，**重建抽样也不会把标注错接到别的评论**
+- `annotations.schema_version` / `duration_ms`：可做标注质量与效率分析
+- WAL + `busy_timeout`：多人同时标注安全
+- 重建会**拒绝覆盖已有标注**（除非 `--force`）
+
+### 5. 一致性（IAA）
+```bash
+python scripts/compute_iaa.py --out iaa.json
+```
+输出每标签 α、D3.type κ、D4 序数 α 与混淆矩阵。
+> 实现已与 PyPI `krippendorff` 库**逐位对齐**（nominal/ordinal 误差 ~1e-16），见 `tests/test_core.py`。
+
+---
+
+## 目录
+
+```
+app.py                        Flask 应用（页面 + REST API）
+app/templates/                annotate / codebook / progress
+app/static/style.css          样式
+codebook/CODEBOOK.md          标注手册（可在 UI 内查看）
+data/annotation.db            500 条标注单元（小，可分享）
+scripts/materialize_units.py  从大库抽样并生成单元（唯一接触大库的脚本）
+scripts/compute_iaa.py        Krippendorff α / Cohen κ
+tests/test_core.py            统计核心回归测试
+```
+
+---
+
+## API 摘要
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/meta` | 抽样溯源（seed、分层规格、schema 版本） |
+| GET | `/api/next?annotator=` | 取下一条未标单元（含 `position`） |
+| GET | `/api/unit/<id>?annotator=` | 取指定单元 |
+| GET | `/api/units?annotator=` | 单元列表（进度页用） |
+| POST | `/api/annotate` | 保存标注（校验 `primary ∈ labels`） |
+| POST | `/api/unit/<id>/card` | 保存视频摘要 / anchor claim |
+| GET | `/api/stats` | 覆盖、标注员、维度填写率 |
+| GET | `/api/export[?annotator=]` | 分析用 CSV（含 `inclusion_prob`、`integrity_ok`） |
+
+---
+
+## 重建数据（需要大库）
+
+```bash
+python scripts/materialize_units.py --target 500 --seed 20261026
+```
+
+默认读取上级工作区的 `data/analysis_805.db` 与 `data/corpus.db`（可用 `--a805/--corpus` 覆盖）。
+
+---
+
+## 当前阶段与后续
+
+- 当前 = **pilot（500 条）**。目标是先跑通流程、暴露歧义。
+- **决策卡（decision cards）尚未固化**：需要 pilot 的双人分歧与"近似但不算"的负例，才能写出真正的裁决卡。见 `codebook/CODEBOOK.md` §7。
+- 后续：pilot → 修订 codebook → 扩大 gold 规模 → 校准 LLM 标注（把 LLM 当 surrogate，用 gold 校准）。

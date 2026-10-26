@@ -1,0 +1,9 @@
+# data: annotation.db IS committed on purpose (small, shareable pilot set).
+# Only transient SQLite side files are ignored.
+data/*.db-wal
+data/*.db-shm
+*.pyc
+__pycache__/
+.venv/
+.DS_Store
+iaa.json

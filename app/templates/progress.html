@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="wrap">
+  <div class="statusbar">
+    <span class="status-text">进度 / 质检 / 导出</span>
+    <div class="status-right">
+      <a class="btn ghost sm" href="/api/export" download>导出全部 CSV</a>
+      <a class="btn ghost sm" href="/api/export?annotator=" id="expmine">导出我的 CSV</a>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <section class="card">
+      <h2>总体覆盖</h2>
+      <div class="bigbar"><div class="bigbar-fill" id="covfill"></div></div>
+      <div class="muted" id="covtext">加载中…</div>
+      <h3>维度填写率</h3>
+      <div class="dimstat" id="dimstat"></div>
+    </section>
+
+    <section class="card">
+      <h2>标注员</h2>
+      <div class="annlist" id="annlist">加载中…</div>
+      <h3>抽样溯源</h3>
+      <div class="provbox" id="provbox">加载中…</div>
+    </section>
+  </div>
+
+  <section class="card">
+    <div class="formhead">
+      <h2>单元列表</h2>
+      <span class="muted">点击 “打开” 可直接进入该单元</span>
+    </div>
+    <div class="unitgrid" id="unitgrid">加载中…</div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function esc(s){ return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+document.getElementById('expmine').addEventListener('click', e=>{
+  const a = getAnnotator();
+  if(!a){ e.preventDefault(); alert('请先输入标注员名字'); return; }
+  e.currentTarget.href = '/api/export?annotator=' + encodeURIComponent(a);
+});
+
+function pct(n,d){ return d ? Math.round(n/d*1000)/10 : 0; }
+
+fetch('/api/stats').then(r=>r.json()).then(s=>{
+  const p = s.coverage_pct;
+  document.getElementById('covfill').style.width = p + '%';
+  document.getElementById('covtext').textContent =
+    `${s.units_covered} / ${s.total_units} 单元已覆盖（${p}%）· 共 ${s.annotations_total} 条标注 · ambiguous ${s.ambiguous}`;
+  const names = {D1:'修辞策略',D2:'语用动机',D3:'议题漂移',D4:'情感/毒性'};
+  document.getElementById('dimstat').innerHTML = Object.entries(s.dimension_filled).map(([d,v])=>{
+    const pv = pct(v, s.total_units);
+    return `<div class="dimrow"><span>${names[d]||d}</span>
+      <div class="minibar"><div class="minibar-fill" style="width:${pv}%"></div></div>
+      <span class="muted">${v} (${pv}%)</span></div>`;
+  }).join('');
+  const maxc = Math.max(1, ...s.annotators.map(a=>a.count));
+  document.getElementById('annlist').innerHTML = s.annotators.length ? s.annotators.map(a=>{
+    const w = Math.round(a.count/maxc*100);
+    return `<div class="annrow"><span class="annname">${esc(a.annotator)}</span>
+      <div class="minibar"><div class="minibar-fill" style="width:${w}%"></div></div>
+      <span class="muted">${a.count}</span></div>`;
+  }).join('') : '<div class="muted">还没有标注记录</div>';
+}).catch(()=>{});
+
+fetch('/api/meta').then(r=>r.json()).then(m=>{
+  const meta = m.meta || {};
+  const pick = ['schema_version','sampling.seed','sampling.target_n','sampling.n_units','sampling.stratification','created_at_iso'];
+  document.getElementById('provbox').innerHTML = pick.map(k=>
+    meta[k]!==undefined ? `<div><b>${esc(k)}</b>: ${esc(meta[k])}</div>` : '').join('')
+    || '<div class="muted">无溯源信息</div>';
+}).catch(()=>{});
+
+const a = getAnnotator();
+let unitsUrl = '/api/units';
+if(a) unitsUrl += '?annotator=' + encodeURIComponent(a);
+fetch(unitsUrl).then(r=>r.json()).then(list=>{
+  document.getElementById('unitgrid').innerHTML = list.map(u=>`
+    <div class="unitcell ${u.status}">
+      <span class="uid">#${u.id}</span>
+      <span class="preview">${esc(u.preview)}</span>
+      <a class="open" href="/?unit=${u.id}">打开</a>
+    </div>`).join('');
+}).catch(()=>{});
+</script>
+{% endblock %}
