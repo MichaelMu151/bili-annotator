@@ -97,6 +97,16 @@
       </div>
     </section>
 
+    <!-- Stance recoverability: shown only for parent_gap units -->
+    <section id="stancesec" class="dim" style="display:none">
+      <h3>立场可判性 <span class="hint">仅「直接父评论缺失」时出现</span></h3>
+      <div class="checks">
+        <label><input type="radio" name="stance" value="yes" /> 可判（能据存活兄弟+楼层根推断其立场/主张）</label>
+        <label><input type="radio" name="stance" value="no" /> 不可判（仅情感可判，立场/对象无从得知）</label>
+        <label><input type="radio" name="stance" value="uncertain" /> 存疑</label>
+      </div>
+    </section>
+
     <!-- D4 -->
     <section class="dim d4">
       <h3>4. 基础情感与攻击强度 <span class="hint">极性 · 唤醒度 · 毒性(0–3) · 证据</span></h3>
@@ -253,6 +263,8 @@ function renderUnit(u){
     || u.d3_assessable === false;
   const lab = document.getElementById('d3unassesslab');
   if(lab) lab.style.display = d3un ? '' : 'none';
+  const stancesec = document.getElementById('stancesec');
+  if(stancesec) stancesec.style.display = d3un ? '' : 'none';
   if(u.existing) prefill(u.existing);
   else restoreDraft();
 }
@@ -284,6 +296,7 @@ function prefill(p){
   else if(p.D3?.type){ const r=document.querySelector('input[name=d3type][value="'+p.D3.type+'"]'); if(r) r.checked=true; }
   if(p.D3?.extent) document.querySelector('[name=d3extent]').value=p.D3.extent;
   if(p.D3?.evidence) document.querySelector('[name=d3evidence]').value=p.D3.evidence;
+  if(p.stance_recoverable){ const s=document.querySelector('input[name=stance][value="'+p.stance_recoverable+'"]'); if(s) s.checked=true; }
   if(p.D4?.polarity!=null) document.querySelector('[name=d4polarity]').value=String(p.D4.polarity);
   if(p.D4?.arousal) document.querySelector('[name=d4arousal]').value=p.D4.arousal;
   if(p.D4?.toxicity!=null) document.querySelector('[name=d4toxicity]').value=p.D4.toxicity;
@@ -306,6 +319,7 @@ function collectPayload(){
     D4:{polarity:document.querySelector('[name=d4polarity]').value, arousal:document.querySelector('[name=d4arousal]').value||null, toxicity:document.querySelector('[name=d4toxicity]').value||null, evidence:document.querySelector('[name=d4evidence]').value||''},
     ambiguous: document.querySelector('[name=ambiguous]').checked,
     confidence: document.querySelector('[name=confidence]').value,
+    stance_recoverable: document.querySelector('input[name=stance]:checked')?.value||null,
     notes: document.querySelector('[name=notes]').value
   };
 }

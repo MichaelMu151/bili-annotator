@@ -56,7 +56,7 @@ ANNOTATOR_HOST=0.0.0.0 python app.py
 **上下文完整性（维度感知，`context_status`）**：断链评论**不丢弃、可回收**，按可判性分级：
 - `complete`：祖先链完整到楼层根。
 - `ancestor_gap`：**直接父评论仍在**、仅更高层祖先缺失 → 局部对话完整，**四维全可标**。
-- `parent_gap`：**直接父评论缺失**（被删/未采集）→ D1/D2/D4 仍可从 target 文本判定；**D3 议题漂移不可靠**（无被回复对象），`d3_assessable=0`，卡面显示「无法判定漂移（父评论缺失）」选项，标注后但仍可从 D3 分析中排除。
+- `parent_gap`：**直接父评论缺失**（被删/未采集）→ D1/D2/D4 仍可从 target 文本判定；**D3 议题漂移不可靠**（无被回复对象），`d3_assessable=0`，卡面显示「无法判定漂移（父评论缺失）」选项，标注后但仍可从 D3 分析中排除。**D2 的立场/对象**也可能无从得知 → 出现 `stance_recoverable ∈ {yes,no,uncertain}` 人工判断（仅此类单元），标 `no` 者仅保留情感类分析。
 - 卡面标记 `context_degraded`、`anchor_degraded`、`degraded_reason`，并显示缺失父评论 rpid 与其下存活回复数（`target_meta.missing_parent_rpid / orphan_replies`）；锚点回退楼层根。
 - 实测约占候选 5.2%，且**更长、更偏实质辩论**——丢弃会引入选择偏差，故保留（详见 `scripts/analyze_broken_chain.py`）。`scripts/verify_cards.py` 逐条回查 corpus 校验。
 **不呈现 `C_extra`（溢读带）**：避免标注员的 hindsight bias；该字段留给模型/分析使用。

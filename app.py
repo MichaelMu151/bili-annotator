@@ -279,6 +279,11 @@ def _validate_payload(payload: dict) -> None:
             payload["confidence"] not in CONFIDENCE:
         raise ValueError(f"confidence {payload['confidence']!r} invalid")
 
+    # stance_recoverable: only meaningful for parent_gap units; enum when present.
+    sr = payload.get("stance_recoverable")
+    if sr not in (None, "") and str(sr) not in ("yes", "no", "uncertain", "true", "false"):
+        raise ValueError(f"stance_recoverable {sr!r} invalid")
+
     # Reject a completely empty annotation: an item must carry at least one
     # substantive judgement or be explicitly flagged ambiguous.
     d1h = bool((payload.get("D1") or {}).get("labels") or (payload.get("D1") or {}).get("primary"))
@@ -567,7 +572,7 @@ def api_export():
         "context_degraded", "degraded_reason", "context_status", "d3_assessable",
         "annotator", "d1_labels", "d1_primary", "d1_mixed",
         "d2_labels", "d2_primary", "d2_mixed",
-        "d3_type", "d3_extent", "d3_evidence", "d3_unassessable",
+        "d3_type", "d3_extent", "d3_evidence", "d3_unassessable", "stance_recoverable",
         "d4_polarity", "d4_arousal", "d4_toxicity", "d4_evidence",
         "ambiguous", "confidence", "notes", "created_at", "duration_ms",
         "integrity_ok",
@@ -589,6 +594,7 @@ def api_export():
             "|".join(d1.get("labels") or []), d1.get("primary"), d1.get("is_mixed"),
             "|".join(d2.get("labels") or []), d2.get("primary"), d2.get("is_mixed"),
             d3.get("type"), d3.get("extent"), d3.get("evidence"), d3.get("unassessable"),
+            p.get("stance_recoverable"),
             d4.get("polarity"), d4.get("arousal"), d4.get("toxicity"), d4.get("evidence"),
             p.get("ambiguous"), p.get("confidence"), p.get("notes"),
             r["created_at"], r["duration_ms"],
