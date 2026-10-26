@@ -75,7 +75,7 @@ create table if not exists units(
   path_json text, core_json text, target_rpid text, target_user text,
   target_ts integer, target_text text, target_meta_json text,
   context_degraded integer default 0, anchor_degraded integer default 0,
-  degraded_reason text,
+  degraded_reason text, context_status text, d3_assessable integer default 1,
   stratum_key text, stratum_n integer, inclusion_prob real, sampled_by text,
   created_at integer
 );
@@ -108,6 +108,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         "anchor_rpid", "anchor_text", "anchor_claim", "path_json", "core_json",
         "target_rpid", "target_user", "target_ts", "target_text",
         "target_meta_json", "context_degraded", "anchor_degraded", "degraded_reason",
+        "context_status", "d3_assessable",
         "stratum_key", "stratum_n", "inclusion_prob",
         "sampled_by", "created_at",
     }
@@ -126,7 +127,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             "  path_json text, core_json text, target_rpid text, target_user text,"
             "  target_ts integer, target_text text, target_meta_json text,"
             "  context_degraded integer default 0, anchor_degraded integer default 0,"
-            "  degraded_reason text,"
+            "  degraded_reason text, context_status text, d3_assessable integer default 1,"
             "  stratum_key text, stratum_n integer, inclusion_prob real,"
             "  sampled_by text, created_at integer);"
         )
@@ -435,16 +436,26 @@ def build_card(con, target_rpid: str, meta_by_bvid: dict) -> dict:
         guard += 1
     path.reverse()
 
-    # context integrity: a complete chain must reach the floor root (path[0])
+    # context integrity + per-dimension assessability.
+    #   complete      : full chain to floor root
+    #   ancestor_gap  : parent present (local exchange intact) but a higher
+    #                   ancestor is missing -> all four dimensions assessable
+    #   parent_gap    : the immediate parent (the comment being replied to) is
+    #                   gone -> D1/D2/D4 assessable from target text, but D3
+    #                   (topic drift, measured *relative to the parent*) is not.
     context_degraded = 0
     degraded_reason = None
+    context_status = "complete"
     if not is_root:
         if parent not in fmap:
             context_degraded = 1
             degraded_reason = "parent_missing"
+            context_status = "parent_gap"
         elif not path or path[0]["rpid"] != floor_key:
             context_degraded = 1
             degraded_reason = "ancestor_missing"
+            context_status = "ancestor_gap"
+    d3_assessable = 0 if context_status == "parent_gap" else 1
 
     # branch root = deepest ancestor whose parent is the floor root
     anchor_rpid, anchor_text = "", ""
@@ -485,6 +496,16 @@ def build_card(con, target_rpid: str, meta_by_bvid: dict) -> dict:
         core = [{"rpid": f[0], "user": f[2] or "", "ts": int(f[4] or 0),
                  "text": f[3] or ""} for f in picked]
 
+    # if the immediate parent is gone, record what was lost (rpid + how many
+    # still-present replies point at it) so the UI can say exactly what's missing.
+    missing_parent_rpid = None
+    orphan_replies_n = 0
+    if degraded_reason == "parent_missing":
+        missing_parent_rpid = parent
+        orphan_replies_n = con.execute(
+            "select count(*) from comments where bvid=? and parent_rpid=?",
+            (bvid, parent)).fetchone()[0]
+
     return {
         "unit_key": f"{bvid}:{rpid}",
         "bvid": bvid,
@@ -505,11 +526,16 @@ def build_card(con, target_rpid: str, meta_by_bvid: dict) -> dict:
         "target_text": content or "",
         "target_meta_json": json.dumps(
             {"like": like, "is_root": is_root, "depth_hint": len(path),
-             "context_degraded": context_degraded, "degraded_reason": degraded_reason},
+             "context_degraded": context_degraded, "degraded_reason": degraded_reason,
+             "context_status": context_status,
+             "missing_parent_rpid": missing_parent_rpid,
+             "orphan_replies": orphan_replies_n},
             ensure_ascii=False),
         "context_degraded": context_degraded,
         "anchor_degraded": anchor_degraded,
         "degraded_reason": degraded_reason,
+        "context_status": context_status,
+        "d3_assessable": d3_assessable,
         "created_at": int(time.time()),
     }
 

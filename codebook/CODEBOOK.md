@@ -85,6 +85,9 @@
 **锚点规则**：锚点 = **分支 root 的命题**（人工写 `anchor claim ≤30 字`）。
 - 若分支 root 本身已离题 → 锚点退化为**楼层 root 命题**，并在备注标 `anchor_degraded`。
 - 无主命题（纯情绪/纯表情）→ `anchor claim` 记为"（无明确命题）"。
+- **`context_status=parent_gap`（直接父评论缺失）时，D3 不可靠** → 勾选「无法判定漂移（父评论缺失）」
+  （`D3.unassessable=true`）。该条 D1/D2/D4 照常标注，但 **D3 从漂移分析中排除**，不臆测。
+  卡面会显示缺失父评论 rpid 与其下存活回复数，便于判断 D1/D2/D4 仍可判。
 
 **来源指引**：Grice (1975) 关系准则；Sperber & Wilson (1986) 关联理论；Dziri et al. (2021) 对话 derailment 研究。
 

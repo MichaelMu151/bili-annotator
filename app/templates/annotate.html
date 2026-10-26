@@ -83,6 +83,7 @@
           <label><input type="radio" name="d3type" value="3.2" /> 3.2 合理议题延展</label>
           <label><input type="radio" name="d3type" value="3.3" /> 3.3 离题转移/围魏救赵</label>
           <label><input type="radio" name="d3type" value="3.4" /> 3.4 元争论/辨经</label>
+          <label id="d3unassesslab" style="display:none"><input type="radio" name="d3type" value="__unassessable__" /> 无法判定漂移（父评论缺失）</label>
         </div>
         <div class="meta">
           <label>extent
@@ -204,7 +205,9 @@ function renderUnit(u){
   </details>`;
   document.getElementById('card').innerHTML = `
     <h2>上下文卡</h2>
-    ${u.context_degraded ? `<div class="degraded-banner">⚠ 上下文不完整：${esc(u.degraded_reason==='parent_missing'?'直接父评论已删除/未采集':'上层祖先已删除/未采集')}。祖先链不可完整回溯，<b>锚点已回退为楼层根</b>；D3 请基于楼层根判断，并在备注注明 <code>context_degraded</code>。</div>` : ''}
+    ${u.context_degraded ? `<div class="degraded-banner">${u.context_status==='parent_gap'
+        ? `⚠ 直接父评论缺失${(u.target_meta&&u.target_meta.orphan_replies)?`（其下仍有 ${u.target_meta.orphan_replies} 条回复存活）`:''}：D1/D2/D4 可正常标注；<b>D3 议题漂移不可靠</b>，请勾选「无法判定漂移（父评论缺失）」。锚点已回退为楼层根。`
+        : `⚠ 更高层祖先缺失（直接父评论仍在）：局部对话完整，四维均可正常标注；锚点已回退为楼层根。`}</div>` : ''}
     <div class="block">
       <div class="blktitle">[VIDEO] 视频</div>
       <div class="blkbody">
@@ -245,6 +248,11 @@ function renderUnit(u){
   document.getElementById('savanchor').onclick = ()=>saveCard('anchor_claim', document.getElementById('anchorclaim').value);
 
   resetForm();
+  // reveal the D3 "unassessable" option only when the parent comment is gone
+  const d3un = u.context_status === 'parent_gap' || u.d3_assessable === 0
+    || u.d3_assessable === false;
+  const lab = document.getElementById('d3unassesslab');
+  if(lab) lab.style.display = d3un ? '' : 'none';
   if(u.existing) prefill(u.existing);
   else restoreDraft();
 }
@@ -272,7 +280,8 @@ function prefill(p){
   (p.D2?.labels||[]).forEach(v=>{ const c=document.querySelector('input[name=d2][value="'+v+'"]'); if(c) c.checked=true; });
   if(p.D2?.primary) document.querySelector('[name=d2primary]').value=p.D2.primary;
   if(p.D2?.is_mixed) document.querySelector('[name=d2mixed]').checked=true;
-  if(p.D3?.type){ const r=document.querySelector('input[name=d3type][value="'+p.D3.type+'"]'); if(r) r.checked=true; }
+  if(p.D3?.unassessable){ const r=document.querySelector('input[name=d3type][value="__unassessable__"]'); if(r) r.checked=true; }
+  else if(p.D3?.type){ const r=document.querySelector('input[name=d3type][value="'+p.D3.type+'"]'); if(r) r.checked=true; }
   if(p.D3?.extent) document.querySelector('[name=d3extent]').value=p.D3.extent;
   if(p.D3?.evidence) document.querySelector('[name=d3evidence]').value=p.D3.evidence;
   if(p.D4?.polarity!=null) document.querySelector('[name=d4polarity]').value=String(p.D4.polarity);
@@ -287,11 +296,13 @@ function prefill(p){
 function collectPayload(){
   const d1=[...document.querySelectorAll('input[name=d1]:checked')].map(e=>e.value);
   const d2=[...document.querySelectorAll('input[name=d2]:checked')].map(e=>e.value);
-  const d3type=document.querySelector('input[name=d3type]:checked')?.value||null;
+  let d3type=document.querySelector('input[name=d3type]:checked')?.value||null;
+  const unassess = d3type === '__unassessable__';
+  if(unassess) d3type = null;
   return {
     D1:{labels:d1, primary:document.querySelector('[name=d1primary]').value||null, is_mixed:document.querySelector('[name=d1mixed]').checked},
     D2:{labels:d2, primary:document.querySelector('[name=d2primary]').value||null, is_mixed:document.querySelector('[name=d2mixed]').checked},
-    D3:{type:d3type, extent:document.querySelector('[name=d3extent]').value||null, evidence:document.querySelector('[name=d3evidence]').value||''},
+    D3:{type:d3type, extent: unassess?null:(document.querySelector('[name=d3extent]').value||null), evidence:document.querySelector('[name=d3evidence]').value||'', unassessable: unassess},
     D4:{polarity:document.querySelector('[name=d4polarity]').value, arousal:document.querySelector('[name=d4arousal]').value||null, toxicity:document.querySelector('[name=d4toxicity]').value||null, evidence:document.querySelector('[name=d4evidence]').value||''},
     ambiguous: document.querySelector('[name=ambiguous]').checked,
     confidence: document.querySelector('[name=confidence]').value,
@@ -306,6 +317,7 @@ function validate(payload){
     if(v.primary && !v.labels.includes(v.primary)) return `${dim} 主标签 ${v.primary} 不在已选标签中`;
   }
   const any = payload.D1.labels.length || payload.D2.labels.length || payload.D3.type ||
+              payload.D3.unassessable ||
               (payload.D4.polarity!=='') || payload.ambiguous;
   if(!any) return '至少标注一个维度，或勾选 ambiguous';
   return null;

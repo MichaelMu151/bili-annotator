@@ -255,12 +255,16 @@ def _validate_payload(payload: dict) -> None:
         if primary and primary not in domain:
             raise ValueError(f"{dim}.primary {primary!r} not a valid code")
 
-    # D3: single type from domain, extent ordinal 1-4
+    # D3: single type from domain, extent ordinal 1-4.
+    # When the immediate parent is missing (parent_gap unit) the annotator may
+    # mark D3 as unassessable instead of guessing topic drift.
     d3 = payload.get("D3") or {}
-    if d3.get("type") and d3["type"] not in D3_TYPES:
-        raise ValueError(f"D3.type {d3['type']!r} invalid")
-    if d3.get("extent") not in (None, "") and str(d3["extent"]) not in D3_EXTENTS:
-        raise ValueError(f"D3.extent {d3['extent']!r} invalid (want 1-4)")
+    d3_unassessable = bool(d3.get("unassessable"))
+    if not d3_unassessable:
+        if d3.get("type") and d3["type"] not in D3_TYPES:
+            raise ValueError(f"D3.type {d3['type']!r} invalid")
+        if d3.get("extent") not in (None, "") and str(d3["extent"]) not in D3_EXTENTS:
+            raise ValueError(f"D3.extent {d3['extent']!r} invalid (want 1-4)")
 
     # D4: polarity/arousal/toxicity enums
     d4 = payload.get("D4") or {}
@@ -279,7 +283,7 @@ def _validate_payload(payload: dict) -> None:
     # substantive judgement or be explicitly flagged ambiguous.
     d1h = bool((payload.get("D1") or {}).get("labels") or (payload.get("D1") or {}).get("primary"))
     d2h = bool((payload.get("D2") or {}).get("labels") or (payload.get("D2") or {}).get("primary"))
-    d3h = bool((payload.get("D3") or {}).get("type"))
+    d3h = bool((payload.get("D3") or {}).get("type") or (payload.get("D3") or {}).get("unassessable"))
     d4h = (payload.get("D4") or {}).get("polarity") not in (None, "") or \
           (payload.get("D4") or {}).get("toxicity") not in (None, "") or \
           (payload.get("D4") or {}).get("arousal") not in (None, "")
@@ -518,12 +522,15 @@ def api_stats():
             ambiguous += 1
     total_degraded = conn.execute(
         "select count(*) from units where context_degraded=1").fetchone()[0]
+    status_counts = {row[0]: row[1] for row in conn.execute(
+        "select context_status, count(*) from units group by context_status")}
     conn.close()
     annotators = [{"annotator": k, "count": v}
                   for k, v in sorted(by_ann.items(), key=lambda kv: -kv[1])]
     return jsonify({
         "total_units": total,
         "total_degraded": total_degraded,
+        "context_status": status_counts,
         "units_covered": covered,
         "coverage_pct": round(covered / total * 100, 1) if total else 0.0,
         "annotations_total": len(anns),
@@ -540,7 +547,7 @@ def api_export():
     conn = db()
     q = ("select u.id unit_id, u.bvid, u.target_rpid, u.target_user, u.target_text, "
          "u.stratum_key, u.stratum_n, u.inclusion_prob, u.video_title, "
-         "u.context_degraded, u.degraded_reason, "
+         "u.context_degraded, u.degraded_reason, u.context_status, u.d3_assessable, "
          "a.annotator, a.payload_json, a.created_at, a.updated_at, a.duration_ms, "
          "a.target_rpid as ann_target_rpid "
          "from units u left join annotations a on a.unit_id = u.id ")
@@ -557,10 +564,10 @@ def api_export():
     writer.writerow([
         "unit_id", "bvid", "target_rpid", "target_user", "target_text",
         "stratum_key", "stratum_n", "inclusion_prob", "video_title",
-        "context_degraded", "degraded_reason",
+        "context_degraded", "degraded_reason", "context_status", "d3_assessable",
         "annotator", "d1_labels", "d1_primary", "d1_mixed",
         "d2_labels", "d2_primary", "d2_mixed",
-        "d3_type", "d3_extent", "d3_evidence",
+        "d3_type", "d3_extent", "d3_evidence", "d3_unassessable",
         "d4_polarity", "d4_arousal", "d4_toxicity", "d4_evidence",
         "ambiguous", "confidence", "notes", "created_at", "duration_ms",
         "integrity_ok",
@@ -577,10 +584,11 @@ def api_export():
             r["unit_id"], r["bvid"], r["target_rpid"], r["target_user"],
             r["target_text"], r["stratum_key"], r["stratum_n"], r["inclusion_prob"],
             r["video_title"], r["context_degraded"], r["degraded_reason"],
+            r["context_status"], r["d3_assessable"],
             r["annotator"],
             "|".join(d1.get("labels") or []), d1.get("primary"), d1.get("is_mixed"),
             "|".join(d2.get("labels") or []), d2.get("primary"), d2.get("is_mixed"),
-            d3.get("type"), d3.get("extent"), d3.get("evidence"),
+            d3.get("type"), d3.get("extent"), d3.get("evidence"), d3.get("unassessable"),
             d4.get("polarity"), d4.get("arousal"), d4.get("toxicity"), d4.get("evidence"),
             p.get("ambiguous"), p.get("confidence"), p.get("notes"),
             r["created_at"], r["duration_ms"],

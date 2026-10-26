@@ -53,11 +53,12 @@ ANNOTATOR_HOST=0.0.0.0 python app.py
 | `[CORE]` | **本层** = 楼层根评论 + **前面 3 个评论**（`C_CORE_PRIOR_N=3`；meso 上下文） |
 | `[TARGET]` | 待标评论 |
 
-**上下文完整性（`context_degraded`）**：若某评论的祖先链因**父评论被删除/未采集**而断裂，它**不会被丢弃**，而是：
-- 卡面显示醒目标记「⚠ 上下文不完整」，`context_degraded=1`、`degraded_reason` 记录是 `parent_missing` 还是 `ancestor_missing`；
-- **锚点回退为楼层根**（`anchor_degraded=1`），D3 判定基于楼层根并注明；
-- 实测这批约占候选评论的 **5.2%**，且**更长、更偏实质性辩论**（详见 `scripts/analyze_broken_chain.py`），丢弃会引入选择偏差，故保留标记。
-`scripts/verify_cards.py` 对全部单元逐条回查 corpus 校验（含 degraded 单元的可达链一致性）。
+**上下文完整性（维度感知，`context_status`）**：断链评论**不丢弃、可回收**，按可判性分级：
+- `complete`：祖先链完整到楼层根。
+- `ancestor_gap`：**直接父评论仍在**、仅更高层祖先缺失 → 局部对话完整，**四维全可标**。
+- `parent_gap`：**直接父评论缺失**（被删/未采集）→ D1/D2/D4 仍可从 target 文本判定；**D3 议题漂移不可靠**（无被回复对象），`d3_assessable=0`，卡面显示「无法判定漂移（父评论缺失）」选项，标注后但仍可从 D3 分析中排除。
+- 卡面标记 `context_degraded`、`anchor_degraded`、`degraded_reason`，并显示缺失父评论 rpid 与其下存活回复数（`target_meta.missing_parent_rpid / orphan_replies`）；锚点回退楼层根。
+- 实测约占候选 5.2%，且**更长、更偏实质辩论**——丢弃会引入选择偏差，故保留（详见 `scripts/analyze_broken_chain.py`）。`scripts/verify_cards.py` 逐条回查 corpus 校验。
 **不呈现 `C_extra`（溢读带）**：避免标注员的 hindsight bias；该字段留给模型/分析使用。
 
 ### 2. 量表（详见 codebook）
