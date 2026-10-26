@@ -8,7 +8,7 @@
  *    serve a stale/forged API response. When offline the UI already keeps a
  *    localStorage draft and will retry on reconnect.
  */
-const CACHE = "bili-annotator-v1";
+const CACHE = "bili-annotator-v2";
 const SHELL = [
   "/",
   "/codebook",
@@ -22,7 +22,12 @@ const SHELL = [
 
 self.addEventListener("install", (e) => {
   e.waitUntil(
-    caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())
+    caches.open(CACHE).then((c) =>
+      // cache each shell entry independently so one failure can't abort install
+      Promise.all(
+        SHELL.map((u) => c.add(u).catch(() => {}))
+      )
+    ).then(() => self.skipWaiting())
   );
 });
 

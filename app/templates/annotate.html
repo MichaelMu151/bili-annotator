@@ -215,7 +215,7 @@ async function offlineNext(afterId){
   let next = (afterId ? pool.find(x=>x.id>afterId) : null) || pool[0];
   next = JSON.parse(JSON.stringify(next)); next.existing=null;
   currentUnit = next; startTime = Date.now(); renderUnit(next);
-  setProgress(done.size + 1, b.total);
+  setProgress(Math.min(done.size + 1, b.total), b.total);
 }
 
 function refreshMyTotal(){
@@ -357,8 +357,8 @@ function saveCard(field, val){
   if(!currentUnit) return;
   fetch('/api/unit/'+currentUnit.id+'/card',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({[field]:val})}).then(r=>r.json()).then(d=>{
-      document.getElementById('savestate').textContent = d.ok ? '已保存 '+field : '保存失败';
-    });
+      setSaveState(d.ok ? ('已保存 '+field) : '保存失败', d.ok?'good':'bad');
+    }).catch(()=>setSaveState('摘要/锚点需联网保存','bad'));
 }
 
 function resetForm(){
@@ -427,10 +427,10 @@ function restoreDraft(){ try{ const d=localStorage.getItem(draftKey()); if(d) pr
 let saving = false;
 function setSaveState(msg, cls){ const el=document.getElementById('savestate'); if(el){ el.textContent=msg; el.className='muted '+(cls||''); } }
 
-function persistLocal(payload, duration){
+function queueLocal(payload, duration){
   const q=getQueue(); q[currentUnit.id]={payload, duration_ms:duration, client_ts:Date.now()}; setQueue(q);
-  const done=getDone(); done.add(currentUnit.id); setDone(done);
 }
+function markDone(){ const d=getDone(); d.add(currentUnit.id); setDone(d); }
 function advance(){ localStorage.removeItem(draftKey()); const id=currentUnit.id; loadNext(id); }
 
 document.getElementById('form').addEventListener('submit', e=>{
@@ -440,29 +440,35 @@ document.getElementById('form').addEventListener('submit', e=>{
   const payload=collectPayload();
   const err=validate(payload); if(err){ setSaveState('⚠ '+err,'bad'); return; }
   const duration = Date.now()-startTime;
-  persistLocal(payload, duration);            // durable locally FIRST (works offline)
+  const uid = currentUnit.id;
+  queueLocal(payload, duration);            // durable locally FIRST (works offline)
   saving = true;
-  if(!navigator.onLine){ setSaveState('已本地保存（离线）✓','good'); saving=false; advance(); return; }
+  if(!navigator.onLine){ markDone(); setSaveState('已本地保存（离线）✓','good'); saving=false; advance(); return; }
   setSaveState('保存中…','');
   fetch('/api/annotate',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({unit_id:currentUnit.id, annotator:a, payload, duration_ms:duration})})
+    body:JSON.stringify({unit_id:uid, annotator:a, payload, duration_ms:duration})})
   .then(r=>r.json().then(d=>({ok:r.ok, d})))
   .then(({ok,d})=>{
-    if(ok && d.ok){ const q=getQueue(); delete q[currentUnit.id]; setQueue(q); setSaveState('已保存 ✓','good'); }
-    else { const q=getQueue(); delete q[currentUnit.id]; setQueue(q); setSaveState('保存被拒：'+(d.error||''),'bad'); }
+    if(ok && d.ok){ const q=getQueue(); delete q[uid]; setQueue(q); markDone(); setSaveState('已保存 ✓','good'); advance(); }
+    else { const q=getQueue(); delete q[uid]; setQueue(q); setSaveState('保存被拒：'+(d.error||'')+'（未计入进度，请修正）','bad'); }
+    // hard rejection: stay on this unit, do not advance or mark done
   })
-  .catch(()=>setSaveState('已本地保存（离线，待同步）✓','good'))
-  .finally(()=>{ saving=false; advance(); });
+  .catch(()=>{ markDone(); setSaveState('已本地保存（离线，待同步）✓','good'); advance(); })
+  .finally(()=>{ saving=false; });
 });
 
 document.getElementById('skip').onclick = ()=>{ if(currentUnit) loadNext(currentUnit.id); };
-document.getElementById('prev').onclick = ()=>{
+document.getElementById('prev').onclick = async ()=>{
   if(!currentUnit || currentUnit.id<=1) return;
   const a=getAnnotator();
-  fetch('/api/unit/'+(currentUnit.id-1)+'?annotator='+encodeURIComponent(a))
-    .then(r=>{ if(!r.ok) throw 0; return r.json(); })
-    .then(u=>{ currentUnit=u; startTime=Date.now(); renderUnit(u); })
-    .catch(()=>{});
+  try{
+    const r=await fetch('/api/unit/'+(currentUnit.id-1)+'?annotator='+encodeURIComponent(a));
+    if(!r.ok) throw 0; currentUnit=await r.json(); startTime=Date.now(); renderUnit(currentUnit);
+  }catch(e){
+    const b=await getBundle(); if(!b) return;
+    const u=b.units.find(x=>x.id===currentUnit.id-1);
+    if(u){ const cp=JSON.parse(JSON.stringify(u)); cp.existing=null; currentUnit=cp; startTime=Date.now(); renderUnit(cp); }
+  }
 };
 
 // autosave draft on change

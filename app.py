@@ -241,8 +241,8 @@ def api_offline_bundle():
     """Full set of units for offline annotation (cached client-side in IndexedDB)."""
     conn = db()
     rows = conn.execute("select * from units order by id").fetchall()
-    conn.close()
     units = [row_to_unit(r) for r in rows]
+    conn.close()
     return jsonify({"version": PAYLOAD_SCHEMA, "generated_at": int(time.time()),
                     "total": len(units), "units": units})
 
@@ -255,6 +255,8 @@ def api_sync():
     items = data.get("items") or []
     if not annotator or not isinstance(items, list):
         return jsonify({"error": "annotator and items[] required"}), 400
+    if len(items) > 5000:
+        return jsonify({"error": "too many items in one sync (max 5000)"}), 413
     now = int(time.time())
     conn = db()
     results = []
