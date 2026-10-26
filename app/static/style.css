@@ -96,6 +96,7 @@ main { padding: 18px 22px 60px; }
 .prov { margin-top: 10px; font-size: 12px; color: var(--muted); }
 .prov summary { cursor: pointer; color: var(--accent); }
 .prov code { background: #eef0ff; padding: 1px 5px; border-radius: 4px; }
+.pathdetails summary { cursor: pointer; color: var(--accent); font-size: 13px; margin-bottom: 6px; }
 
 /* form */
 textarea, input[type=text], select {

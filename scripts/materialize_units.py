@@ -60,6 +60,10 @@ LABOR = ("加班", "打工", "牛马", "裁员", "薪资", "工资", "老板", "
 
 STICKER_RE = re.compile(r"\[[^\[\]]{1,30}\]")
 
+# Number of preceding same-floor comments shown as C_core (in addition to the
+# floor root), matching the "本层 + 前面 3 个评论" context spec.
+CORE_PRIOR_N = 3
+
 SCHEMA = f"""
 create table if not exists meta(key text primary key, value text);
 create table if not exists units(
@@ -235,14 +239,21 @@ def video_is_labor(meta: dict) -> str:
 
 
 # ----------------------------- per-video pass ----------------------------- #
-def process_video(con, bvid, meta) -> list[tuple]:
-    """Compact candidate records for one video: (rpid, stratum_key_json, bvid)."""
+def process_video(con, bvid, meta) -> tuple[list[tuple], int]:
+    """Compact candidate records for one video: (rpid, stratum_key_json, bvid).
+
+    Only comments whose **entire ancestor chain resolves to a floor root within
+    the collected data** are emitted. Comments whose parent was deleted/not
+    collected cannot be given a faithful context card (empty/degraded anchor and
+    path), so they are excluded here rather than silently mis-contextualised
+    downstream. Returns (candidates, n_excluded_broken_chain).
+    """
     rows = con.execute(
         "select rpid,parent_rpid,root_rpid,hierarchy_level,content,pub_ts "
         "from comments where bvid=? order by rpid", (bvid,),
     ).fetchall()
     if not rows:
-        return []
+        return [], 0
     by_rpid = {r[0]: r for r in rows}
     floor_of = {}
     floor_size = defaultdict(int)
@@ -250,6 +261,41 @@ def process_video(con, bvid, meta) -> list[tuple]:
         fk = rpid if lvl == "root" else root
         floor_of[rpid] = fk
         floor_size[fk] += 1
+
+    # --- ancestor-chain validity (memoised, per video) ---
+    valid_cache: dict[str, bool] = {}
+
+    def chain_valid(rpid: str) -> bool:
+        if rpid in valid_cache:
+            return valid_cache[rpid]
+        stack = []
+        cur = rpid
+        result = None
+        while True:
+            if cur in valid_cache:
+                result = valid_cache[cur]
+                break
+            row = by_rpid.get(cur)
+            if row is None:
+                result = False
+                break
+            lvl, par = row[3], row[1]
+            if lvl == "root":
+                result = True
+                valid_cache[cur] = True
+                break
+            stack.append(cur)
+            if (not par) or par == "0" or par == cur:
+                result = False
+                break
+            cur = par
+            if len(stack) > 5000:
+                result = False
+                break
+        for node in stack:
+            valid_cache[node] = result
+        valid_cache[rpid] = result
+        return result
 
     depth_cache: dict[str, int] = {}
 
@@ -274,16 +320,20 @@ def process_video(con, bvid, meta) -> list[tuple]:
 
     topic = video_is_labor(meta)
     out = []
+    excluded = 0
     for rpid, parent, root, lvl, content, ts in rows:
         content = content or ""
         tlen = len(content)
         if tlen == 0:
             continue
+        if lvl != "root" and not chain_valid(rpid):
+            excluded += 1
+            continue
         d = 0 if lvl == "root" else depth(rpid)
         skey = (topic, heat_bucket(floor_size[floor_of[rpid]]), depth_bucket(d),
                 polarity_bucket(content), flagtype(content, tlen), length_bucket(tlen))
         out.append((rpid, json.dumps(skey, ensure_ascii=False), bvid))
-    return out
+    return out, excluded
 
 
 # ----------------------------- stratified sample ----------------------------- #
@@ -361,7 +411,8 @@ def build_card(con, target_rpid: str, meta_by_bvid: dict) -> dict:
 
     floor = con.execute(
         "select rpid,parent_rpid,user_name,content,pub_ts from comments "
-        "where (root_rpid=? or rpid=?) order by pub_ts, rpid", (floor_key, floor_key)
+        "where bvid=? and (root_rpid=? or rpid=?) order by pub_ts, rpid",
+        (bvid, floor_key, floor_key),
     ).fetchall()
     fmap = {f[0]: f for f in floor}
 
@@ -405,7 +456,8 @@ def build_card(con, target_rpid: str, meta_by_bvid: dict) -> dict:
         picked = []
         if rootrow and rootrow[0] != rpid:
             picked.append(rootrow)
-        tail = [f for f in prior if not (rootrow and f[0] == rootrow[0])][-5:]
+        # "前面 N 个评论": the N nearest preceding comments in this floor
+        tail = [f for f in prior if not (rootrow and f[0] == rootrow[0])][-CORE_PRIOR_N:]
         picked.extend(tail)
         core = [{"rpid": f[0], "user": f[2] or "", "ts": int(f[4] or 0),
                  "text": f[3] or ""} for f in picked]
@@ -474,12 +526,17 @@ def main():
 
     con = sqlite3.connect(args.corpus)
     all_cands: list[tuple] = []
+    n_broken = 0
     for i, bvid in enumerate(bvids):
-        all_cands.extend(process_video(con, bvid, meta_by_bvid.get(
-            bvid, {"title": "", "author": "", "desc": "", "tags": []})))
+        cands, excluded = process_video(con, bvid, meta_by_bvid.get(
+            bvid, {"title": "", "author": "", "desc": "", "tags": []}))
+        all_cands.extend(cands)
+        n_broken += excluded
         if (i + 1) % 200 == 0:
-            print(f"  processed {i+1}/{len(bvids)} videos, cands={len(all_cands):,}")
-    print(f"total candidate comments: {len(all_cands):,}")
+            print(f"  processed {i+1}/{len(bvids)} videos, cands={len(all_cands):,}, "
+                  f"broken_chain_excluded={n_broken:,}")
+    print(f"total candidate comments: {len(all_cands):,} "
+          f"(excluded broken-chain: {n_broken:,})")
 
     picked = stratified_sample(all_cands, args.target, args.seed)
     print(f"sampled {len(picked)} units; building cards...")
@@ -514,6 +571,7 @@ def main():
         "sampling.target_n": str(args.target),
         "sampling.n_units": str(built),
         "sampling.n_candidates": str(len(all_cands)),
+        "sampling.n_broken_chain_excluded": str(n_broken),
         "sampling.stratification": STRATIFICATION_SPEC,
         "sampling.quota_rule": "quota ~ sqrt(stratum_size), min 1, then trim/topup",
         "source.a805": json.dumps(file_info(args.a805), ensure_ascii=False),

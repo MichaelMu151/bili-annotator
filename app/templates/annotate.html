@@ -195,7 +195,7 @@ function renderUnit(u){
   document.getElementById('unitid').textContent = '#' + u.id + (u.position ? ` (第 ${u.position} 条)` : '');
   document.getElementById('status').textContent = '待标注';
   const tags = (u.tags||[]).join(', ') || '—';
-  const path = (u.path||[]).map(x=>`<li><b>${esc(x.user)}</b>：${esc(x.text)}</li>`).join('') || '<li class="muted">（无，根评论）</li>';
+  const pathList = (u.path||[]).map(x=>`<li><b>${esc(x.user)}</b>：${esc(x.text)}</li>`).join('') || '<li class="muted">（无，根评论）</li>';
   const core = (u.core||[]).map(x=>`<li><b>${esc(x.user)}</b>：${esc(x.text)}</li>`).join('') || '<li class="muted">（无）</li>';
   const prov = `<details class="prov"><summary>抽样溯源（学术透明）</summary>
     <div>stratum: <code>${esc(JSON.stringify(u.stratum))}</code></div>
@@ -224,8 +224,13 @@ function renderUnit(u){
         <button id="savanchor" class="btn ghost sm">保存锚点</button>
       </div>
     </div>
-    <div class="block"><div class="blktitle">[PATH] 祖先链（root → … → parent）</div><ul class="ctxlist">${path}</ul></div>
-    <div class="block"><div class="blktitle">[CORE] C_core（≤parent 时刻，必读下界）</div><ul class="ctxlist">${core}</ul></div>
+    <div class="block"><div class="blktitle">[PATH] 祖先链（root → … → parent，共 ${(u.path||[]).length} 层）</div>
+      <details class="pathdetails" ${(u.path||[]).length<=6?'open':''}>
+        <summary>${(u.path||[]).length<=6?'祖先链':'展开/收起完整祖先链（较长，默认收起）'}</summary>
+        <ul class="ctxlist">${pathList}</ul>
+      </details>
+    </div>
+    <div class="block"><div class="blktitle">[CORE] 本层 <span class="hint">楼层根 + 前面 3 个评论</span></div><ul class="ctxlist">${core}</ul></div>
     <div class="block target">
       <div class="blktitle">[TARGET] 待标评论</div>
       <div class="blkbody">

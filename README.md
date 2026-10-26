@@ -49,10 +49,13 @@ ANNOTATOR_HOST=0.0.0.0 python app.py
 |---|---|
 | `[VIDEO]` | 标题 / UP / 标签 / **可编辑摘要** + BV 链接（建议亲自核对视频） |
 | `[ANCHOR]` | 分支 root 原文 + **人工 anchor claim（≤30字）**；维度 3 的漂移基准 |
-| `[PATH]` | 祖先链 `root → … → parent` **逐字**（micro 上下文） |
-| `[CORE]` | `C_core`：同楼层 `t ≤ parent` 的评论（最近 ≤5 + 楼层根；meso 上下文） |
+| `[PATH]` | 祖先链 `root → … → parent` **完整逐字**（长链默认折叠；micro 上下文） |
+| `[CORE]` | **本层** = 楼层根评论 + **前面 3 个评论**（`C_CORE_PRIOR_N=3`；meso 上下文） |
 | `[TARGET]` | 待标评论 |
 
+**只纳入"祖先链完整"的评论**：若某评论的父级已被删除/未采集，它没有可靠上下文，
+材料阶段即**排除**（约 5.2% 的候选评论；排除数记录在 `meta.sampling.n_broken_chain_excluded`），
+绝不生成空/降级的卡。`scripts/verify_cards.py` 可对全部单元逐条回查 corpus 校验。
 **不呈现 `C_extra`（溢读带）**：避免标注员的 hindsight bias；该字段留给模型/分析使用。
 
 ### 2. 量表（详见 codebook）
@@ -95,6 +98,7 @@ app/static/style.css          样式
 codebook/CODEBOOK.md          标注手册（可在 UI 内查看）
 data/annotation.db            500 条标注单元（小，可分享）
 scripts/materialize_units.py  从大库抽样并生成单元（唯一接触大库的脚本）
+scripts/verify_cards.py       逐条回查 corpus 校验上下文卡（parent/root/video/anchor/path/core）
 scripts/compute_iaa.py        Krippendorff α / Cohen κ
 tests/test_core.py            统计核心回归测试
 ```
@@ -125,6 +129,14 @@ python scripts/materialize_units.py --target 500 --seed 20261026
 ```
 
 默认读取上级工作区的 `data/analysis_805.db` 与 `data/corpus.db`（可用 `--a805/--corpus` 覆盖）。
+
+**扩充规模**：`--target 2000` 或 `--target 3000` 即可（实测 3000 条约 40 秒，抽样确定性不变）。
+
+**校验上下文卡**（强烈建议每次重建后运行）：
+
+```bash
+python scripts/verify_cards.py            # 逐条回查 corpus，失败则退出码非 0
+```
 
 ---
 
