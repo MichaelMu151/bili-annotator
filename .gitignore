@@ -7,6 +7,9 @@ __pycache__/
 .venv/
 .DS_Store
 iaa.json
+# launchd service runtime logs
+data/server.out.log
+data/server.err.log
 # dev-only browser-automation scaffolding (not part of the deliverable)
 node_modules/
 package.json

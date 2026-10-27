@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.mushiquan.biliannotator</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/mushiquan/Desktop/bili-annotator/scripts/serve.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/mushiquan/bili-annotator</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>ANNOTATOR_HOST</key>
+    <string>0.0.0.0</string>
+    <key>ANNOTATOR_PORT</key>
+    <string>5005</string>
+  </dict>
+
+  <!-- start at login and keep alive (restart if it crashes) -->
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <!-- throttle rapid restart loops -->
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+
+  <key>StandardOutPath</key>
+  <string>/Users/mushiquan/bili-annotator/data/server.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/mushiquan/bili-annotator/data/server.err.log</string>
+</dict>
+</plist>
