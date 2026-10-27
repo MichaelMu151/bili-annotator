@@ -349,6 +349,11 @@ def _validate_payload(payload: dict) -> None:
             payload["confidence"] not in CONFIDENCE:
         raise ValueError(f"confidence {payload['confidence']!r} invalid")
 
+    # context_bound: boolean-ish; normalise validation only
+    cb = payload.get("context_bound")
+    if cb not in (None, "", True, False, 0, 1, "true", "false"):
+        raise ValueError(f"context_bound {cb!r} invalid")
+
     # stance_recoverable: only meaningful for parent_gap units; enum when present.
     sr = payload.get("stance_recoverable")
     if sr not in (None, "") and str(sr) not in ("yes", "no", "uncertain", "true", "false"):
@@ -362,7 +367,8 @@ def _validate_payload(payload: dict) -> None:
     d4h = (payload.get("D4") or {}).get("polarity") not in (None, "") or \
           (payload.get("D4") or {}).get("toxicity") not in (None, "") or \
           (payload.get("D4") or {}).get("arousal") not in (None, "")
-    if not (d1h or d2h or d3h or d4h or payload.get("ambiguous")):
+    if not (d1h or d2h or d3h or d4h or payload.get("ambiguous")
+            or payload.get("context_bound")):
         raise ValueError("empty annotation: fill at least one dimension or mark ambiguous")
 
 
@@ -644,7 +650,7 @@ def api_export():
         "d2_labels", "d2_primary", "d2_mixed",
         "d3_type", "d3_extent", "d3_evidence", "d3_unassessable", "stance_recoverable",
         "d4_polarity", "d4_arousal", "d4_toxicity", "d4_evidence",
-        "ambiguous", "confidence", "notes", "created_at", "duration_ms",
+        "ambiguous", "context_bound", "confidence", "notes", "created_at", "duration_ms",
         "integrity_ok",
     ])
     for r in rows:
@@ -666,7 +672,7 @@ def api_export():
             d3.get("type"), d3.get("extent"), d3.get("evidence"), d3.get("unassessable"),
             p.get("stance_recoverable"),
             d4.get("polarity"), d4.get("arousal"), d4.get("toxicity"), d4.get("evidence"),
-            p.get("ambiguous"), p.get("confidence"), p.get("notes"),
+            p.get("ambiguous"), p.get("context_bound"), p.get("confidence"), p.get("notes"),
             r["created_at"], r["duration_ms"],
             # integrity: annotation must still point at the unit it was made for
             ("" if r["ann_target_rpid"] is None

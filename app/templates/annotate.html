@@ -153,6 +153,7 @@
       <div class="row">
         <div class="checks">
           <label class="inline"><input type="checkbox" name="ambiguous" /> ambiguous（无法判定/证据不足）</label>
+          <label class="inline"><input type="checkbox" name="contextbound" /> context_bound（语境依赖：离开上下文无独立意义）</label>
           <label>置信度
             <select name="confidence">
               <option>high</option><option selected>medium</option><option>low</option>
@@ -386,6 +387,7 @@ function prefill(p){
   if(p.D4?.toxicity!=null) document.querySelector('[name=d4toxicity]').value=p.D4.toxicity;
   if(p.D4?.evidence) document.querySelector('[name=d4evidence]').value=p.D4.evidence;
   if(p.ambiguous) document.querySelector('[name=ambiguous]').checked=true;
+  if(p.context_bound) document.querySelector('[name=contextbound]').checked=true;
   if(p.confidence) document.querySelector('[name=confidence]').value=p.confidence;
   if(p.notes) document.querySelector('[name=notes]').value=p.notes;
 }
@@ -402,6 +404,7 @@ function collectPayload(){
     D3:{type:d3type, extent: unassess?null:(document.querySelector('[name=d3extent]').value||null), evidence:document.querySelector('[name=d3evidence]').value||'', unassessable: unassess},
     D4:{polarity:document.querySelector('[name=d4polarity]').value, arousal:document.querySelector('[name=d4arousal]').value||null, toxicity:document.querySelector('[name=d4toxicity]').value||null, evidence:document.querySelector('[name=d4evidence]').value||''},
     ambiguous: document.querySelector('[name=ambiguous]').checked,
+    context_bound: document.querySelector('[name=contextbound]').checked,
     confidence: document.querySelector('[name=confidence]').value,
     stance_recoverable: document.querySelector('input[name=stance]:checked')?.value||null,
     notes: document.querySelector('[name=notes]').value
@@ -416,8 +419,8 @@ function validate(payload){
   }
   const any = payload.D1.labels.length || payload.D2.labels.length || payload.D3.type ||
               payload.D3.unassessable ||
-              (payload.D4.polarity!=='') || payload.ambiguous;
-  if(!any) return '至少标注一个维度，或勾选 ambiguous';
+              (payload.D4.polarity!=='') || payload.ambiguous || payload.context_bound;
+  if(!any) return '至少标注一个维度，或勾选 ambiguous/context_bound';
   return null;
 }
 
